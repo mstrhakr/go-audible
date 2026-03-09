@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -110,28 +111,71 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		return nil, fmt.Errorf("license request failed: %w", err)
 	}
 
-	// Use json.RawMessage for content_metadata so we can parse nested content_url
-	var response struct {
-		ContentLicense struct {
-			ASIN            string          `json:"asin"`
-			ContentMetadata json.RawMessage `json:"content_metadata"`
-			ContentURL      string          `json:"content_url"`
-			VoucherMessage  string          `json:"message,omitempty"`
-			StatusCode      string          `json:"status_code"`
-			DrmType         string          `json:"drm_type"`
-			Voucher         string          `json:"voucher,omitempty"`
-			Key             string          `json:"key,omitempty"`
-			IV              string          `json:"iv,omitempty"`
-			RefreshDate     string          `json:"refresh_date,omitempty"`
-			LicenseResponse string          `json:"license_response,omitempty"`
-		} `json:"content_license"`
-	}
+	// DEBUG: Log raw API response to stderr for diagnostics
+	fmt.Fprintf(os.Stderr, "[go-audible] RAW API RESPONSE for ASIN %s (length=%d bytes):\n%s\n\n",
+		asin, len(respBody), string(respBody))
 
-	if err := json.Unmarshal(respBody, &response); err != nil {
+	// Parse content_license in a tolerant way because Audible can return
+	// key/iv in different nested shapes depending on marketplace/content.
+	var root map[string]any
+	if err := json.Unmarshal(respBody, &root); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal license response: %w", err)
 	}
 
-	license := response.ContentLicense
+	contentLicenseRaw, ok := root["content_license"]
+	if !ok {
+		return nil, fmt.Errorf("license response missing content_license")
+	}
+
+	contentLicenseMap, ok := contentLicenseRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("license response content_license has unexpected type")
+	}
+
+	license := struct {
+		ASIN            string
+		ContentMetadata json.RawMessage
+		ContentURL      string
+		VoucherMessage  string
+		StatusCode      string
+		DrmType         string
+		Voucher         string
+		Key             string
+		IV              string
+		RefreshDate     string
+		LicenseResponse string
+	}{}
+
+	license.ASIN = asString(contentLicenseMap["asin"])
+	license.ContentURL = asString(contentLicenseMap["content_url"])
+	license.VoucherMessage = asString(contentLicenseMap["message"])
+	license.StatusCode = asString(contentLicenseMap["status_code"])
+	license.DrmType = asString(contentLicenseMap["drm_type"])
+	license.Voucher = asString(contentLicenseMap["voucher"])
+	license.Key = asString(contentLicenseMap["key"])
+	license.IV = asString(contentLicenseMap["iv"])
+	license.RefreshDate = asString(contentLicenseMap["refresh_date"])
+
+	if v, ok := contentLicenseMap["content_metadata"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			license.ContentMetadata = json.RawMessage(b)
+		}
+	}
+
+	if v, ok := contentLicenseMap["license_response"]; ok {
+		switch vv := v.(type) {
+		case string:
+			license.LicenseResponse = vv
+		case map[string]any:
+			if b, err := json.Marshal(vv); err == nil {
+				license.LicenseResponse = string(b)
+			}
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				license.LicenseResponse = string(b)
+			}
+		}
+	}
 
 	// Parse content_metadata into our struct
 	var contentMeta ContentMetadata
@@ -149,20 +193,46 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		_ = json.Unmarshal(license.ContentMetadata, &nestedURL)
 	}
 
-	// Try to extract key/iv from the nested license_response JSON string
-	// if the flat fields are empty. Some content returns them embedded.
-	if license.Key == "" && license.IV == "" && license.LicenseResponse != "" {
-		var nested struct {
-			Key string `json:"key"`
-			IV  string `json:"iv"`
+	// Extract key/iv from nested structures when top-level fields are empty.
+	if license.Key == "" || license.IV == "" {
+		if k, i := findKeyIV(contentLicenseMap); k != "" && i != "" {
+			license.Key, license.IV = k, i
 		}
-		if err := json.Unmarshal([]byte(license.LicenseResponse), &nested); err == nil {
-			license.Key = nested.Key
-			license.IV = nested.IV
+	}
+	if (license.Key == "" || license.IV == "") && license.LicenseResponse != "" {
+		var lr any
+		if err := json.Unmarshal([]byte(license.LicenseResponse), &lr); err == nil {
+			if k, i := findKeyIV(lr); k != "" && i != "" {
+				license.Key, license.IV = k, i
+			}
 		}
 	}
 
 	isAAXC := license.Key != "" && license.IV != ""
+
+	// DEBUG: Log API response details to stderr for diagnostics
+	debugOutput := fmt.Sprintf(
+		"[go-audible] GetDownloadInfo for ASIN %s: drm_type=%s, statusCode=%s, "+
+			"keyPresent=%v, ivPresent=%v, isAAXC=%v, voucherPresent=%v\n",
+		asin, license.DrmType, license.StatusCode,
+		license.Key != "", license.IV != "", isAAXC, license.Voucher != "")
+	fmt.Fprint(os.Stderr, debugOutput)
+
+	// If in verbose/debug mode, also log the actual keys (truncated for safety)
+	if os.Getenv("DEBUG_GO_AUDIBLE") != "" {
+		keyTrunc := license.Key
+		if len(keyTrunc) > 16 {
+			keyTrunc = keyTrunc[:8] + "..." + keyTrunc[len(keyTrunc)-8:]
+		}
+		ivTrunc := license.IV
+		if len(ivTrunc) > 16 {
+			ivTrunc = ivTrunc[:8] + "..." + ivTrunc[len(ivTrunc)-8:]
+		}
+		verboseOutput := fmt.Sprintf(
+			"[go-audible] DEBUG: key=%s, iv=%s, licenseResponse_len=%d, voucher_len=%d\n",
+			keyTrunc, ivTrunc, len(license.LicenseResponse), len(license.Voucher))
+		fmt.Fprint(os.Stderr, verboseOutput)
+	}
 
 	// Determine download URL: prefer content_url sources from the license.
 	downloadURL := license.ContentURL
@@ -197,6 +267,63 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 	}
 
 	return result, nil
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+func findKeyIV(v any) (string, string) {
+	type state struct {
+		key string
+		iv  string
+	}
+	st := &state{}
+	walkForKeyIV(v, st)
+	return st.key, st.iv
+}
+
+func walkForKeyIV(v any, st *struct{ key, iv string }) {
+	if st.key != "" && st.iv != "" {
+		return
+	}
+
+	switch node := v.(type) {
+	case map[string]any:
+		if st.key == "" {
+			if val, ok := node["key"].(string); ok && val != "" {
+				st.key = val
+			}
+		}
+		if st.iv == "" {
+			if val, ok := node["iv"].(string); ok && val != "" {
+				st.iv = val
+			}
+		}
+		for _, child := range node {
+			walkForKeyIV(child, st)
+			if st.key != "" && st.iv != "" {
+				return
+			}
+		}
+	case []any:
+		for _, child := range node {
+			walkForKeyIV(child, st)
+			if st.key != "" && st.iv != "" {
+				return
+			}
+		}
+	case string:
+		trimmed := strings.TrimSpace(node)
+		if !(strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
+			return
+		}
+		var nested any
+		if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
+			walkForKeyIV(nested, st)
+		}
+	}
 }
 
 // GetChapters retrieves chapter information for an audiobook.
