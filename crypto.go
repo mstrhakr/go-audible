@@ -237,6 +237,9 @@ func DecryptVoucher(voucherBase64, deviceType, deviceSerial, customerID, asin st
 		}
 	}
 
+	// Trim any trailing null bytes that may remain after padding removal
+	plaintext = trimNullBytes(plaintext)
+
 	// Parse JSON voucher to extract key and IV
 	var voucher struct {
 		Key string `json:"key"`
@@ -251,4 +254,12 @@ func DecryptVoucher(voucherBase64, deviceType, deviceSerial, customerID, asin st
 	}
 
 	return voucher.Key, voucher.IV, nil
+}
+
+// trimNullBytes removes trailing null bytes from a byte slice.
+func trimNullBytes(b []byte) []byte {
+	for len(b) > 0 && b[len(b)-1] == 0 {
+		b = b[:len(b)-1]
+	}
+	return b
 }
