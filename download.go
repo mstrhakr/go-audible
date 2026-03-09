@@ -215,22 +215,34 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		creds := c.credentials
 		c.mu.RUnlock()
 
-		if creds != nil && creds.DeviceInfo.DeviceSerialNumber != "" && creds.CustomerID != "" {
-			key, iv, err := DecryptVoucher(
-				license.LicenseResponse,
-				creds.DeviceInfo.DeviceType,
-				creds.DeviceInfo.DeviceSerialNumber,
-				creds.CustomerID,
-				asin,
-			)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[go-audible] Failed to decrypt voucher for ASIN %s: %v\n", asin, err)
-			} else {
+		if creds != nil && creds.DeviceInfo.DeviceSerialNumber != "" {
+			customerIDs := candidateCustomerIDs(creds.CustomerID, license.VoucherMessage)
+			var lastErr error
+			for _, customerID := range customerIDs {
+				key, iv, err := DecryptVoucher(
+					license.LicenseResponse,
+					creds.DeviceInfo.DeviceType,
+					creds.DeviceInfo.DeviceSerialNumber,
+					customerID,
+					asin,
+				)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if !looksLikeAAXCKeyIV(key, iv) {
+					lastErr = fmt.Errorf("decrypted voucher returned non-hex or unexpected key/iv lengths")
+					continue
+				}
 				license.Key, license.IV = key, iv
-				fmt.Fprintf(os.Stderr, "[go-audible] Successfully decrypted voucher for ASIN %s\n", asin)
+				fmt.Fprintf(os.Stderr, "[go-audible] Successfully decrypted voucher for ASIN %s using customer_id=%s\n", asin, customerID)
+				break
+			}
+			if license.Key == "" || license.IV == "" {
+				fmt.Fprintf(os.Stderr, "[go-audible] Failed to decrypt voucher for ASIN %s after %d customer_id candidates: %v\n", asin, len(customerIDs), lastErr)
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "[go-audible] Cannot decrypt voucher: missing device info or customer ID\n")
+			fmt.Fprintf(os.Stderr, "[go-audible] Cannot decrypt voucher: missing device info\n")
 		}
 	}
 
@@ -298,6 +310,64 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func candidateCustomerIDs(storedCustomerID, voucherMessage string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 3)
+
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+
+	add(storedCustomerID)
+
+	if strings.HasPrefix(storedCustomerID, "amzn1.account.") {
+		add(strings.TrimPrefix(storedCustomerID, "amzn1.account."))
+	}
+
+	if userID := extractUserIDFromVoucherMessage(voucherMessage); userID != "" {
+		add(userID)
+	}
+
+	return out
+}
+
+func extractUserIDFromVoucherMessage(msg string) string {
+	start := strings.Index(msg, "User [")
+	if start < 0 {
+		return ""
+	}
+	start += len("User [")
+	endRel := strings.Index(msg[start:], "]")
+	if endRel < 0 {
+		return ""
+	}
+	return strings.TrimSpace(msg[start : start+endRel])
+}
+
+func looksLikeAAXCKeyIV(key, iv string) bool {
+	if len(key) != 32 || len(iv) != 32 {
+		return false
+	}
+	return isHex(key) && isHex(iv)
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 type keyIVState struct {
