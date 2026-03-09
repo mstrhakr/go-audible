@@ -1,0 +1,47 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace file
+go.work
+
+# Credentials and config files
+credentials.json
+*.json
+!go.mod
+!go.sum
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS files
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+
+# Audio files (if any tests generate them)
+*.aax
+*.m4b
+*.mp3
+*.m4a
+
+# Logs
+*.log
