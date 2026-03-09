@@ -94,11 +94,12 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 	path := fmt.Sprintf("/1.0/content/%s/licenserequest?%s", asin, params.Encode())
 
 	// Build license request body.
-	// quality=High + drm_type=Adrm requests AAXC when available (key+IV returned).
+	// supported_drm_types (PLURAL, array) requests AAXC when available (key+IV returned).
+	// NOTE: Using "drm_type" (singular) will NOT return AAXC credentials!
 	reqBody := map[string]interface{}{
-		"drm_type":         "Adrm",
-		"consumption_type": "Download",
-		"quality":          "High",
+		"supported_drm_types": []string{"Mpeg", "Adrm"},
+		"consumption_type":    "Download",
+		"quality":             "High",
 	}
 
 	bodyJSON, err := json.Marshal(reqBody)
