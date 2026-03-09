@@ -274,17 +274,18 @@ func asString(v any) string {
 	return s
 }
 
+type keyIVState struct {
+	key string
+	iv  string
+}
+
 func findKeyIV(v any) (string, string) {
-	type state struct {
-		key string
-		iv  string
-	}
-	st := &state{}
+	st := &keyIVState{}
 	walkForKeyIV(v, st)
 	return st.key, st.iv
 }
 
-func walkForKeyIV(v any, st *struct{ key, iv string }) {
+func walkForKeyIV(v any, st *keyIVState) {
 	if st.key != "" && st.iv != "" {
 		return
 	}
