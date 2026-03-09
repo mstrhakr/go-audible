@@ -183,3 +183,71 @@ func GenerateRandomState() (string, error) {
 	}
 	return hex.EncodeToString(state), nil
 }
+
+// DecryptVoucher decrypts an AAXC license voucher to extract the key and IV.
+// The voucher is encrypted with AES-CBC using a key derived from device/account info.
+func DecryptVoucher(voucherBase64, deviceType, deviceSerial, customerID, asin string) (key, iv string, err error) {
+	// Base64 decode the voucher
+	voucherEncrypted, err := base64.StdEncoding.DecodeString(voucherBase64)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to decode voucher: %w", err)
+	}
+
+	// Derive decryption key from device/account info
+	// Format: SHA256(device_type + device_serial + customer_id + asin)
+	buf := deviceType + deviceSerial + customerID + asin
+	digest := sha256.Sum256([]byte(buf))
+
+	// First 16 bytes = AES key, next 16 bytes = IV
+	aesKey := digest[0:16]
+	aesIV := digest[16:32]
+
+	// Decrypt using AES-128-CBC (note: using 16-byte key, not 32)
+	block, err := aes.NewCipher(aesKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	if len(voucherEncrypted)%aes.BlockSize != 0 {
+		return "", "", fmt.Errorf("voucher ciphertext is not a multiple of block size")
+	}
+
+	// Decrypt
+	plaintext := make([]byte, len(voucherEncrypted))
+	mode := cipher.NewCBCDecrypter(block, aesIV)
+	mode.CryptBlocks(plaintext, voucherEncrypted)
+
+	// Remove PKCS7 padding
+	if len(plaintext) == 0 {
+		return "", "", fmt.Errorf("decrypted voucher is empty")
+	}
+	padding := int(plaintext[len(plaintext)-1])
+	if padding > 0 && padding <= aes.BlockSize {
+		// Validate padding
+		valid := true
+		for i := len(plaintext) - padding; i < len(plaintext); i++ {
+			if plaintext[i] != byte(padding) {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			plaintext = plaintext[:len(plaintext)-padding]
+		}
+	}
+
+	// Parse JSON voucher to extract key and IV
+	var voucher struct {
+		Key string `json:"key"`
+		IV  string `json:"iv"`
+	}
+	if err := json.Unmarshal(plaintext, &voucher); err != nil {
+		return "", "", fmt.Errorf("failed to parse voucher JSON: %w", err)
+	}
+
+	if voucher.Key == "" || voucher.IV == "" {
+		return "", "", fmt.Errorf("voucher missing key or iv fields")
+	}
+
+	return voucher.Key, voucher.IV, nil
+}

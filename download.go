@@ -209,6 +209,31 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		}
 	}
 
+	// If still no key/IV and we have an encrypted voucher, decrypt it
+	if (license.Key == "" || license.IV == "") && license.LicenseResponse != "" {
+		c.mu.RLock()
+		creds := c.credentials
+		c.mu.RUnlock()
+
+		if creds != nil && creds.DeviceInfo.DeviceSerialNumber != "" && creds.CustomerID != "" {
+			key, iv, err := DecryptVoucher(
+				license.LicenseResponse,
+				creds.DeviceInfo.DeviceType,
+				creds.DeviceInfo.DeviceSerialNumber,
+				creds.CustomerID,
+				asin,
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[go-audible] Failed to decrypt voucher for ASIN %s: %v\n", asin, err)
+			} else {
+				license.Key, license.IV = key, iv
+				fmt.Fprintf(os.Stderr, "[go-audible] Successfully decrypted voucher for ASIN %s\n", asin)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "[go-audible] Cannot decrypt voucher: missing device info or customer ID\n")
+		}
+	}
+
 	isAAXC := license.Key != "" && license.IV != ""
 
 	// DEBUG: Log API response details to stderr for diagnostics
