@@ -152,3 +152,19 @@ func (c *Client) UnmarshalCredentials(data []byte) error {
 	c.mu.Unlock()
 	return nil
 }
+
+// SetMarketplace updates the marketplace used by this client.
+// This should be called before making API requests if the default marketplace
+// doesn't match the account's marketplace.
+func (c *Client) SetMarketplace(marketplace Marketplace) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.marketplace = marketplace
+}
+
+// Marketplace returns the current marketplace.
+func (c *Client) Marketplace() Marketplace {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.marketplace
+}
