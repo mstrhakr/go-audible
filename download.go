@@ -84,6 +84,60 @@ type LicenseResponse struct {
 	RefreshDate string `json:"refresh_date,omitempty"`
 }
 
+// LicenseDenialReason describes one Audible license denial reason.
+type LicenseDenialReason struct {
+	Message         string
+	RejectionReason string
+	ValidationType  string
+}
+
+// LicenseDeniedError indicates Audible denied a content license request.
+type LicenseDeniedError struct {
+	ASIN       string
+	StatusCode string
+	Message    string
+	Reasons    []LicenseDenialReason
+}
+
+func (e *LicenseDeniedError) Error() string {
+	if e == nil {
+		return "license denied"
+	}
+
+	base := fmt.Sprintf("license denied for ASIN %s", e.ASIN)
+	if e.StatusCode != "" {
+		base += fmt.Sprintf(" (status=%s)", e.StatusCode)
+	}
+	if e.Message != "" {
+		base += ": " + e.Message
+	}
+
+	if len(e.Reasons) == 0 {
+		return base
+	}
+
+	parts := make([]string, 0, len(e.Reasons))
+	for _, r := range e.Reasons {
+		reason := strings.TrimSpace(r.Message)
+		if reason == "" {
+			reason = "unspecified denial reason"
+		}
+		meta := make([]string, 0, 2)
+		if r.RejectionReason != "" {
+			meta = append(meta, r.RejectionReason)
+		}
+		if r.ValidationType != "" {
+			meta = append(meta, r.ValidationType)
+		}
+		if len(meta) > 0 {
+			reason += " [" + strings.Join(meta, "/") + "]"
+		}
+		parts = append(parts, reason)
+	}
+
+	return base + "; reasons: " + strings.Join(parts, " | ")
+}
+
 // GetDownloadInfo retrieves the download URL and license for an audiobook.
 func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInfo, error) {
 	// Request license and download URL
@@ -156,6 +210,7 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 	license.Key = asString(contentLicenseMap["key"])
 	license.IV = asString(contentLicenseMap["iv"])
 	license.RefreshDate = asString(contentLicenseMap["refresh_date"])
+	denialReasons := parseLicenseDenialReasons(contentLicenseMap["license_denial_reasons"])
 
 	if v, ok := contentLicenseMap["content_metadata"]; ok {
 		if b, err := json.Marshal(v); err == nil {
@@ -272,6 +327,15 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		fmt.Fprint(os.Stderr, verboseOutput)
 	}
 
+	if strings.EqualFold(license.StatusCode, "Denied") {
+		return nil, &LicenseDeniedError{
+			ASIN:       asin,
+			StatusCode: license.StatusCode,
+			Message:    strings.TrimSpace(license.VoucherMessage),
+			Reasons:    denialReasons,
+		}
+	}
+
 	// Determine download URL: prefer content_url sources from the license.
 	downloadURL := license.ContentURL
 	if downloadURL == "" {
@@ -310,6 +374,36 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 func asString(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+func parseLicenseDenialReasons(v any) []LicenseDenialReason {
+	rawReasons, ok := v.([]any)
+	if !ok || len(rawReasons) == 0 {
+		return nil
+	}
+
+	reasons := make([]LicenseDenialReason, 0, len(rawReasons))
+	for _, raw := range rawReasons {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		reason := LicenseDenialReason{
+			Message:         asString(m["message"]),
+			RejectionReason: asString(m["rejectionReason"]),
+			ValidationType:  asString(m["validationType"]),
+		}
+		if reason.Message == "" && reason.RejectionReason == "" && reason.ValidationType == "" {
+			continue
+		}
+		reasons = append(reasons, reason)
+	}
+
+	if len(reasons) == 0 {
+		return nil
+	}
+
+	return reasons
 }
 
 func candidateCustomerIDs(storedCustomerID, voucherMessage string) []string {
