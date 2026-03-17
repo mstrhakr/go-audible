@@ -19,8 +19,18 @@ type Library struct {
 }
 
 // Book represents an audiobook in the user's library.
+//
+// The Audible API returns a single "asin" field that may contain different
+// identifier types depending on the book. UnmarshalJSON classifies the raw
+// value into the correct typed field so callers always know what they have.
+// Use BestID() to get whichever identifier is available for downstream use.
 type Book struct {
-	ASIN                string         `json:"asin"`
+	// Identifier fields — only the applicable one will be populated.
+	ASIN    string `json:"asin,omitempty"`     // Audible ASIN: starts with 'B', 10 chars
+	ISBN10  string `json:"isbn10,omitempty"`   // ISBN-10: exactly 10 decimal digits
+	ISBN13  string `json:"isbn13,omitempty"`   // ISBN-13: exactly 13 decimal digits
+	OtherID string `json:"other_id,omitempty"` // Any other identifier format
+
 	Title               string         `json:"title"`
 	Subtitle            string         `json:"subtitle,omitempty"`
 	Authors             []Contributor  `json:"authors"`
@@ -43,6 +53,104 @@ type Book struct {
 	ContentDeliveryType string         `json:"content_delivery_type"`
 	ContentType         string         `json:"content_type"`
 	IsAyce              bool           `json:"is_ayce"`
+}
+
+// BestID returns the most specific available identifier in priority order:
+// Audible ASIN → ISBN-10 → ISBN-13 → other identifier.
+func (b Book) BestID() string {
+	if b.ASIN != "" {
+		return b.ASIN
+	}
+	if b.ISBN10 != "" {
+		return b.ISBN10
+	}
+	if b.ISBN13 != "" {
+		return b.ISBN13
+	}
+	return b.OtherID
+}
+
+// UnmarshalJSON implements json.Unmarshaler. The Audible API always returns the
+// identifier in the "asin" field regardless of its actual type, so we classify
+// the raw value here and populate only the correct typed field.
+func (b *Book) UnmarshalJSON(data []byte) error {
+	// Use a local struct mirroring Book's wire format but with a plain "asin"
+	// capture field and no ASIN/ISBN fields, preventing recursion.
+	var raw struct {
+		RawID               string         `json:"asin"`
+		Title               string         `json:"title"`
+		Subtitle            string         `json:"subtitle,omitempty"`
+		Authors             []Contributor  `json:"authors"`
+		Narrators           []Contributor  `json:"narrators"`
+		Publisher           string         `json:"publisher_name"`
+		PublisherSummary    string         `json:"publisher_summary"`
+		RuntimeMinutes      int            `json:"runtime_length_min"`
+		FormatType          string         `json:"format_type"`
+		Language            string         `json:"language"`
+		ReleaseDate         string         `json:"release_date"`
+		PurchaseDate        string         `json:"purchase_date"`
+		ProductImages       ProductImages  `json:"product_images"`
+		Series              []SeriesInfo   `json:"series,omitempty"`
+		Relationships       []Relationship `json:"relationships,omitempty"`
+		Categories          []Category     `json:"category_ladders,omitempty"`
+		Rating              Rating         `json:"rating,omitempty"`
+		IsDownloadable      bool           `json:"is_downloadable"`
+		IsReturnable        bool           `json:"is_returnable"`
+		PercentComplete     float64        `json:"percent_complete"`
+		ContentDeliveryType string         `json:"content_delivery_type"`
+		ContentType         string         `json:"content_type"`
+		IsAyce              bool           `json:"is_ayce"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	b.Title = raw.Title
+	b.Subtitle = raw.Subtitle
+	b.Authors = raw.Authors
+	b.Narrators = raw.Narrators
+	b.Publisher = raw.Publisher
+	b.PublisherSummary = raw.PublisherSummary
+	b.RuntimeMinutes = raw.RuntimeMinutes
+	b.FormatType = raw.FormatType
+	b.Language = raw.Language
+	b.ReleaseDate = raw.ReleaseDate
+	b.PurchaseDate = raw.PurchaseDate
+	b.ProductImages = raw.ProductImages
+	b.Series = raw.Series
+	b.Relationships = raw.Relationships
+	b.Categories = raw.Categories
+	b.Rating = raw.Rating
+	b.IsDownloadable = raw.IsDownloadable
+	b.IsReturnable = raw.IsReturnable
+	b.PercentComplete = raw.PercentComplete
+	b.ContentDeliveryType = raw.ContentDeliveryType
+	b.ContentType = raw.ContentType
+	b.IsAyce = raw.IsAyce
+
+	// Classify the raw identifier into its correct typed field.
+	id := strings.TrimSpace(raw.RawID)
+	switch {
+	case len(id) == 10 && id[0] == 'B':
+		b.ASIN = id
+	case len(id) == 10 && isAllDigits(id):
+		b.ISBN10 = id
+	case len(id) == 13 && isAllDigits(id):
+		b.ISBN13 = id
+	case id != "":
+		b.OtherID = id
+	}
+	return nil
+}
+
+// isAllDigits reports whether s consists entirely of ASCII decimal digits.
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Contributor represents an author or narrator.
