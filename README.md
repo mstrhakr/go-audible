@@ -1,16 +1,20 @@
 # go-audible
 
-A pure Go library for authenticating with Audible and accessing the Audible API.
+Pure Go client for Audible authentication and API access.
+
+This library supports OAuth + device registration, signed Audible API requests,
+library browsing, download URL + license retrieval, chapter metadata, and AAX
+activation bytes extraction.
 
 ## Features
 
-- OAuth2 authentication with Amazon/Audible (PKCE flow)
-- Device registration and credential management
-- Request signing (SHA256withRSA)
-- Activation bytes extraction for AAX decryption
-- Library access (list books, metadata)
-- Content download URLs
-- Multi-marketplace support (US, UK, DE, etc.)
+- OAuth authentication with Amazon/Audible using PKCE
+- Device registration and token refresh
+- Audible request signing (`SHA256withRSA`)
+- Library APIs (`GetLibrary`, `GetAllLibrary`, `GetBook`)
+- Download/license APIs (`GetDownloadInfo`, `GetChapters`, `DownloadBook`)
+- AAX activation bytes extraction (`GetActivationBytes`)
+- Multi-marketplace support (US, UK, DE, FR, AU, CA, IT, IN, JP, ES, BR)
 
 ## Installation
 
@@ -32,57 +36,132 @@ import (
 )
 
 func main() {
-    // Create a new client for US marketplace
+    ctx := context.Background()
     client := audible.NewClient(audible.MarketplaceUS)
 
-    // Start OAuth flow - returns URL for user to visit
+    // 1) Generate sign-in URL
     authURL, err := client.GetAuthURL()
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Println("Visit this URL to authenticate:", authURL)
+    fmt.Println("Visit:", authURL.URL)
 
-    // After user authenticates, they'll be redirected with a code
-    // Exchange the code for credentials
-    var authCode string
-    fmt.Print("Enter the authorization code: ")
-    fmt.Scanln(&authCode)
+    // 2) Paste full redirect URL from the browser after sign-in
+    var redirectURL string
+    fmt.Print("Redirect URL: ")
+    fmt.Scanln(&redirectURL)
 
-    if err := client.Authenticate(context.Background(), authCode); err != nil {
+    code, err := audible.HandleAuthRedirect(redirectURL)
+    if err != nil {
         log.Fatal(err)
     }
 
-    // Get user's library
-    library, err := client.GetLibrary(context.Background())
+    // 3) Exchange auth code for credentials
+    err = client.Authenticate(ctx, audible.DeviceRegistrationRequest{
+        AuthorizationCode: code,
+        CodeVerifier:      authURL.CodeVerifier,
+        DeviceSerial:      authURL.DeviceSerial,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 4) Query library
+    library, err := client.GetLibrary(ctx, audible.WithPageSize(10))
     if err != nil {
         log.Fatal(err)
     }
 
     for _, book := range library.Items {
-        fmt.Printf("%s by %s\n", book.Title, book.Authors[0].Name)
+        author := "Unknown"
+        if len(book.Authors) > 0 {
+            author = book.Authors[0].Name
+        }
+        fmt.Printf("%s by %s\n", book.Title, author)
     }
-
-    // Get activation bytes for AAX decryption
-    activationBytes, err := client.GetActivationBytes(context.Background())
-    if err != nil {
-        log.Fatal(err)
-    }
-    fmt.Println("Activation bytes:", activationBytes)
 }
 ```
 
 ## Authentication Flow
 
-1. Call `GetAuthURL()` to generate an OAuth URL
-2. User visits the URL and logs into Amazon
-3. Amazon redirects to callback URL with authorization code
-4. Call `Authenticate(code)` to exchange code for credentials
-5. Credentials are stored and used for subsequent API calls
+1. Call `GetAuthURL()`.
+2. User signs in at `authURL.URL`.
+3. Capture full redirect URL from the browser.
+4. Parse auth code with `HandleAuthRedirect(redirectURL)`.
+5. Call `Authenticate(ctx, DeviceRegistrationRequest{...})`.
+6. Persist credentials with `MarshalCredentials()` for reuse.
+
+## Credential Persistence
+
+```go
+// Save credentials
+data, err := client.MarshalCredentials()
+if err != nil {
+    return err
+}
+err = os.WriteFile("credentials.json", data, 0o600)
+
+// Load credentials
+data, err = os.ReadFile("credentials.json")
+if err != nil {
+    return err
+}
+err = client.UnmarshalCredentials(data)
+```
+
+Note: `LoadCredentials` and `SaveCredentials` are currently placeholders and
+return `not implemented`.
+
+## Library API
+
+```go
+// Paged library
+library, err := client.GetLibrary(ctx,
+    audible.WithPageSize(50),
+    audible.WithSortBy("-PurchaseDate"),
+)
+
+// Entire library (auto-pagination)
+allBooks, err := client.GetAllLibrary(ctx)
+
+// Single book
+book, err := client.GetBook(ctx, "B08G9PRS1K")
+```
+
+## Download API
+
+```go
+// Download metadata + license info
+info, err := client.GetDownloadInfo(ctx, "B08G9PRS1K")
+if err != nil {
+    return err
+}
+fmt.Println("Content URL:", info.ContentURL)
+
+// Chapters
+chapters, err := client.GetChapters(ctx, "B08G9PRS1K")
+
+// Stream download using your DownloadWriter implementation
+_, err = client.DownloadBook(ctx, "B08G9PRS1K", writer)
+```
+
+For AAXC content, `info.LicenseResponse` may contain `Key` and `IV` for decryption.
+
+## Activation Bytes (AAX)
+
+```go
+activation, err := client.GetActivationBytes(ctx)
+if err != nil {
+    return err
+}
+fmt.Println("Activation bytes:", activation.ActivationBytes)
+// ffmpeg -activation_bytes <bytes> -i book.aax -c copy book.m4b
+```
 
 ## Supported Marketplaces
 
 | Marketplace | Domain | Country |
-| ----------- | ------ | ------- |
+| --- | --- | --- |
 | `MarketplaceUS` | audible.com | United States |
 | `MarketplaceUK` | audible.co.uk | United Kingdom |
 | `MarketplaceDE` | audible.de | Germany |
@@ -92,49 +171,15 @@ func main() {
 | `MarketplaceIT` | audible.it | Italy |
 | `MarketplaceIN` | audible.in | India |
 | `MarketplaceJP` | audible.co.jp | Japan |
+| `MarketplaceES` | audible.es | Spain |
+| `MarketplaceBR` | audible.com.br | Brazil |
 
-## API Reference
+Use `GetMarketplace("us")` or `AllMarketplaces()` for lookup/discovery.
 
-### Client
+## Examples
 
-```go
-// Create client for a marketplace
-client := audible.NewClient(audible.MarketplaceUS)
-
-// Load existing credentials
-client.LoadCredentials("path/to/credentials.json")
-
-// Save credentials for later use
-client.SaveCredentials("path/to/credentials.json")
-```
-
-### Library
-
-```go
-// Get full library
-library, err := client.GetLibrary(ctx)
-
-// Get library with options
-library, err := client.GetLibrary(ctx, 
-    audible.WithResponseGroups("product_desc", "contributors", "series"),
-    audible.WithPageSize(50),
-)
-
-// Get single book
-book, err := client.GetBook(ctx, "B08G9PRS1K")
-```
-
-### Downloads
-
-```go
-// Get download URL for a book
-download, err := client.GetDownloadURL(ctx, "B08G9PRS1K")
-fmt.Println(download.ContentURL)
-
-// Get activation bytes for decryption
-activationBytes, err := client.GetActivationBytes(ctx)
-// Use with FFmpeg: ffmpeg -activation_bytes <bytes> -i book.aax -c copy book.m4b
-```
+- `examples/basic`: authentication + library listing
+- `examples/download`: fetch metadata + download a title
 
 ## License
 

@@ -19,12 +19,14 @@ Example:
 
 	client := audible.NewClient(audible.MarketplaceUS)
 
-	authURL, _ := client.GetAuthURL()
-	// Direct the user to authURL.URL to sign in with Amazon.
+	auth, _ := client.GetAuthURL()
+	// Direct the user to auth.URL to sign in with Amazon.
 	// After signing in they land on a maplanding page — extract the code:
 	code, _ := audible.HandleAuthRedirect(redirectURL)
 	client.Authenticate(ctx, audible.DeviceRegistrationRequest{
 		AuthorizationCode: code,
+		CodeVerifier:      auth.CodeVerifier,
+		DeviceSerial:      auth.DeviceSerial,
 	})
 
 # Library Access
