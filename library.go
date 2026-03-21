@@ -70,6 +70,31 @@ func (b Book) BestID() string {
 	return b.OtherID
 }
 
+// Downloadable reports whether a Book is eligible for Audible download.
+//
+// Audible's `is_downloadable` field is known to be unreliable for some titles
+// (e.g. audiobook in library but marked false). As a defensive fallback we
+// also consider content type and delivery format.
+func (b Book) Downloadable() bool {
+	if b.IsDownloadable {
+		return true
+	}
+
+	// Most downloadable content on Audible is audiobook format.
+	if strings.EqualFold(b.ContentType, "audiobook") {
+		return true
+	}
+
+	// Content delivery type hints at actual downloadable package.
+	typ := strings.TrimSpace(strings.ToUpper(b.ContentDeliveryType))
+	switch typ {
+	case "AAX", "AAXC", "AAXA", "MP3", "DOWNLOAD":
+		return true
+	}
+
+	return false
+}
+
 // UnmarshalJSON implements json.Unmarshaler. The Audible API always returns the
 // identifier in the "asin" field regardless of its actual type, so we classify
 // the raw value here and populate only the correct typed field.

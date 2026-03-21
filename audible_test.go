@@ -44,6 +44,43 @@ func TestGetMarketplace(t *testing.T) {
 	}
 }
 
+func TestBookDownloadable(t *testing.T) {
+	tests := []struct {
+		name string
+		book audible.Book
+		want bool
+	}{
+		{
+			name: "api declares downloadable",
+			book: audible.Book{IsDownloadable: true, ContentType: "ebook"},
+			want: true,
+		},
+		{
+			name: "audio content_type implies downloadable",
+			book: audible.Book{IsDownloadable: false, ContentType: "audiobook"},
+			want: true,
+		},
+		{
+			name: "delivery type implies downloadable",
+			book: audible.Book{IsDownloadable: false, ContentType: "ebook", ContentDeliveryType: "AAXC"},
+			want: true,
+		},
+		{
+			name: "ebook not downloadable",
+			book: audible.Book{IsDownloadable: false, ContentType: "ebook"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.book.Downloadable(); got != tt.want {
+				t.Fatalf("Book.Downloadable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAllMarketplaces(t *testing.T) {
 	markets := audible.AllMarketplaces()
 
