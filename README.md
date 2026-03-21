@@ -6,6 +6,8 @@ This library supports OAuth + device registration, signed Audible API requests,
 library browsing, download URL + license retrieval, chapter metadata, and AAX
 activation bytes extraction.
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/mstrhakr/go-audible.svg)](https://pkg.go.dev/github.com/mstrhakr/go-audible)
+
 ## Features
 
 - OAuth authentication with Amazon/Audible using PKCE
