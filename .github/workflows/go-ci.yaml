@@ -38,11 +38,11 @@ jobs:
 
       - name: Run go test with coverage
         run: |
-          go test -coverprofile=coverage.out ./...
+          go test -coverprofile=coverage.out ./.
           go tool cover -func=coverage.out
 
       - name: Run go test race
-        run: go test -race ./...
+        run: go test -race ./.
 
       - name: Install golangci-lint
         run: |
@@ -50,5 +50,5 @@ jobs:
 
       - name: Run linter
         run: |
-          $(go env GOPATH)/bin/golangci-lint run ./...
+          $(go env GOPATH)/bin/golangci-lint run ./.
 
