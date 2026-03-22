@@ -72,16 +72,20 @@ func (b Book) BestID() string {
 
 // Downloadable reports whether a Book is eligible for Audible download.
 //
-// Audible's `is_downloadable` field is known to be unreliable for some titles
-// (e.g. audiobook in library but marked false). As a defensive fallback we
-// also consider content type and delivery format.
+// We do not trust Audible's `is_downloadable` value (it is often false for
+// actually downloadable content). Instead, evaluate based on known content
+// metadata hints (content type/format/delivery type), and let smarter checks
+// validate via download flow.
 func (b Book) Downloadable() bool {
-	if b.IsDownloadable {
+	// Most downloadable content on Audible is audiobook format (or product entry).
+	if strings.EqualFold(b.ContentType, "audiobook") || strings.EqualFold(b.ContentType, "product") {
 		return true
 	}
 
-	// Most downloadable content on Audible is audiobook format.
-	if strings.EqualFold(b.ContentType, "audiobook") {
+	// Format type may also indicate an audiobook package type.
+	fmtType := strings.TrimSpace(strings.ToUpper(b.FormatType))
+	switch fmtType {
+	case "AAX", "AAXC", "AAXA", "MP3", "AUDIBLE AUDIOBOOK", "AUDIOBOOK":
 		return true
 	}
 
@@ -93,6 +97,46 @@ func (b Book) Downloadable() bool {
 	}
 
 	return false
+}
+
+// CanDownload checks whether a book is actually download-capable by optionally
+// validating with the download workflow (download info + minimal stream probe).
+func (c *Client) CanDownload(ctx context.Context, b Book) (bool, error) {
+	if !b.Downloadable() {
+		return false, nil
+	}
+
+	asin := b.BestID()
+	if asin == "" {
+		return false, fmt.Errorf("book has no valid identifier")
+	}
+
+	info, err := c.GetDownloadInfo(ctx, asin)
+	if err != nil {
+		return false, err
+	}
+
+	if info == nil || info.ContentURL == "" {
+		return false, fmt.Errorf("download info missing content URL")
+	}
+
+	// Probe first 100 bytes from the content URL to confirm streaming starts.
+	req, err := http.NewRequestWithContext(ctx, "GET", info.ContentURL, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Range", "bytes=0-99")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return false, fmt.Errorf("download URL probe returned status %d", resp.StatusCode)
+	}
+
+	return true, nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler. The Audible API always returns the

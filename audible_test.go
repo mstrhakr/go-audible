@@ -51,9 +51,9 @@ func TestBookDownloadable(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "api declares downloadable",
+			name: "api declares downloadable but content-type ebook",
 			book: audible.Book{IsDownloadable: true, ContentType: "ebook"},
-			want: true,
+			want: false,
 		},
 		{
 			name: "audio content_type implies downloadable",
@@ -65,8 +65,16 @@ func TestBookDownloadable(t *testing.T) {
 			book: audible.Book{IsDownloadable: false, ContentType: "ebook", ContentDeliveryType: "AAXC"},
 			want: true,
 		},
+		{name: "product content_type implies downloadable",
+			book: audible.Book{IsDownloadable: false, ContentType: "Product"},
+			want: true,
+		},
 		{
-			name: "ebook not downloadable",
+			name: "format_type implies downloadable",
+			book: audible.Book{IsDownloadable: false, ContentType: "Product", FormatType: "AAX"},
+			want: true,
+		},
+		{name: "ebook not downloadable",
 			book: audible.Book{IsDownloadable: false, ContentType: "ebook"},
 			want: false,
 		},
