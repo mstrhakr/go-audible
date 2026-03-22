@@ -1,13 +1,15 @@
 name: CI
 
+permissions:
+  contents: read
+  id-token: write
+
 on:
   push:
     branches:
-      - main
       - master
   pull_request:
     branches:
-      - main
       - master
 
 jobs:
@@ -17,15 +19,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.25.4'
 
       - name: Cache Go modules
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/go-build
