@@ -273,7 +273,7 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 	}
 
 	// Build request
-	regURL := fmt.Sprintf("https://api.%s/auth/register", c.marketplace.AmazonDomain())
+	regURL := fmt.Sprintf("%s/auth/register", c.apiBaseURL())
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", regURL, strings.NewReader(string(bodyJSON)))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -378,7 +378,7 @@ func (c *Client) DeregisterDevice(ctx context.Context) error {
 	}
 
 	// Build deregistration request
-	deregURL := fmt.Sprintf("https://api.%s/auth/deregister", c.marketplace.AmazonDomain())
+	deregURL := fmt.Sprintf("%s/auth/deregister", c.apiBaseURL())
 
 	body := map[string]interface{}{
 		"deregister_all_existing_accounts": false,
@@ -418,19 +418,22 @@ func (c *Client) DeregisterDevice(ctx context.Context) error {
 
 // refreshToken refreshes the access token using the refresh token.
 func (c *Client) doRefreshToken(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	c.mu.RLock()
 	if c.credentials == nil {
+		c.mu.RUnlock()
 		return ErrNotAuthenticated
 	}
 
-	refreshURL := fmt.Sprintf("https://api.%s/auth/token", c.marketplace.AmazonDomain())
+	refreshToken := c.credentials.RefreshToken
+	endpoint := c.APIEndpoint()
+	c.mu.RUnlock()
+
+	refreshURL := fmt.Sprintf("%s/auth/token", endpoint)
 
 	body := url.Values{
 		"app_name":             {AppName},
 		"app_version":          {AppVersion},
-		"source_token":         {c.credentials.RefreshToken},
+		"source_token":         {refreshToken},
 		"source_token_type":    {"refresh_token"},
 		"requested_token_type": {"access_token"},
 	}
@@ -464,6 +467,12 @@ func (c *Client) doRefreshToken(ctx context.Context) error {
 		return fmt.Errorf("failed to decode token response: %w", err)
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.credentials == nil {
+		return ErrNotAuthenticated
+	}
 	c.credentials.AccessToken = tokenResp.AccessToken
 	c.credentials.ExpiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
 

@@ -197,6 +197,8 @@ func (b *Book) UnmarshalJSON(data []byte) error {
 	b.ContentType = raw.ContentType
 	b.IsAyce = raw.IsAyce
 
+	// Initialize identifier fields before classification.
+	b.ASIN, b.ISBN10, b.ISBN13, b.OtherID = "", "", "", ""
 	// Classify the raw identifier into its correct typed field.
 	id := strings.TrimSpace(raw.RawID)
 	switch {
@@ -454,7 +456,7 @@ func (c *Client) doAPIRequest(ctx context.Context, method, path, body string) ([
 	}
 
 	// Build full URL
-	fullURL := c.marketplace.APIEndpoint() + path
+	fullURL := c.apiBaseURL() + path
 
 	var bodyReader io.Reader
 	if body != "" {

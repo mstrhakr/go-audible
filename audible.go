@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,6 +18,7 @@ import (
 // Client is the main Audible API client.
 type Client struct {
 	marketplace Marketplace
+	apiEndpoint string
 	httpClient  *http.Client
 	credentials *Credentials
 	mu          sync.RWMutex
@@ -57,6 +60,7 @@ type DeviceInfo struct {
 func NewClient(marketplace Marketplace) *Client {
 	return &Client{
 		marketplace: marketplace,
+		apiEndpoint: marketplace.APIEndpoint(),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -67,6 +71,7 @@ func NewClient(marketplace Marketplace) *Client {
 func NewClientWithHTTP(marketplace Marketplace, httpClient *http.Client) *Client {
 	return &Client{
 		marketplace: marketplace,
+		apiEndpoint: marketplace.APIEndpoint(),
 		httpClient:  httpClient,
 	}
 }
@@ -98,19 +103,26 @@ func (c *Client) SetCredentials(creds *Credentials) {
 
 // LoadCredentials loads credentials from a JSON file.
 func (c *Client) LoadCredentials(path string) error {
-	// Implementation will read and decrypt credentials file
-	return fmt.Errorf("not implemented")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return c.UnmarshalCredentials(data)
 }
 
 // SaveCredentials saves credentials to a JSON file.
 func (c *Client) SaveCredentials(path string) error {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	if c.credentials == nil {
+		c.mu.RUnlock()
 		return fmt.Errorf("no credentials to save")
 	}
-	// Implementation will encrypt and write credentials file
-	return fmt.Errorf("not implemented")
+	data, err := json.Marshal(c.credentials)
+	c.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 // RefreshAccessToken refreshes the access token if it's expired or about to expire.
@@ -159,7 +171,31 @@ func (c *Client) UnmarshalCredentials(data []byte) error {
 func (c *Client) SetMarketplace(marketplace Marketplace) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.apiEndpoint == "" || c.apiEndpoint == c.marketplace.APIEndpoint() {
+		c.apiEndpoint = marketplace.APIEndpoint()
+	}
 	c.marketplace = marketplace
+}
+
+// SetAPIEndpoint overrides the API endpoint URL used by doAPIRequest/auth calls.
+func (c *Client) SetAPIEndpoint(endpoint string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.apiEndpoint = strings.TrimRight(endpoint, "/")
+}
+
+// APIEndpoint returns current API endpoint (explicit override first, fallback to marketplace default).
+func (c *Client) APIEndpoint() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.apiEndpoint != "" {
+		return c.apiEndpoint
+	}
+	return c.marketplace.APIEndpoint()
+}
+
+func (c *Client) apiBaseURL() string {
+	return c.APIEndpoint()
 }
 
 // Marketplace returns the current marketplace.
