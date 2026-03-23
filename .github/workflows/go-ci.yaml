@@ -44,10 +44,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Run go test with coverage
+      - name: Run go test with coverage (80% threshold)
         run: |
           go test -coverprofile=coverage.out ./.
-          go tool cover -func=coverage.out
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage ($COVERAGE%) is below threshold (80%)"
+            exit 1
+          fi
+
 
       - name: Run go test race
         run: go test -race ./.
