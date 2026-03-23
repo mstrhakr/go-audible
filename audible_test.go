@@ -3,7 +3,7 @@ package audible_test
 import (
 	"testing"
 
-	"github.com/mstrhakr/go-audible"
+	audible "github.com/mstrhakr/go-audible"
 )
 
 func TestNewClient(t *testing.T) {
