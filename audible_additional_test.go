@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -564,6 +565,64 @@ func TestGetChapters(t *testing.T) {
 	}
 	if chapters.RuntimeLengthMs != 1234 {
 		t.Fatalf("unexpected runtime length %d", chapters.RuntimeLengthMs)
+	}
+}
+
+func TestLibraryOptionsWithResponseGroups(t *testing.T) {
+	opt := WithResponseGroups("contributors", "price")
+	cfg := &libraryOptions{}
+	opt(cfg)
+	if !reflect.DeepEqual(cfg.responseGroups, []string{"contributors", "price"}) {
+		t.Fatalf("expected response groups set, got %v", cfg.responseGroups)
+	}
+}
+
+func TestCanDownloadLowHang(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	// Not downloadable book short-circuit.
+	ok, err := c.CanDownload(context.Background(), Book{ContentType: "ebook"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected not downloadable")
+	}
+
+	// No ASIN should return an error on downloadable book.
+	_, err = c.CanDownload(context.Background(), Book{ContentType: "audiobook"})
+	if err == nil {
+		t.Fatal("expected error for book missing identifier")
+	}
+}
+
+func TestCanDownloadEndToEnd(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/1.0/content/B001/licenserequest") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content_license":{"content_url":"` + server.URL + `/download","status_code":"Ok"}}`))
+			return
+		}
+		if r.URL.Path == "/download" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("0123456789"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	c := NewClient(MarketplaceUS)
+	c.SetAPIEndpoint(server.URL)
+	c.SetCredentials(&Credentials{ADPToken: "x", AccessToken: "a", RefreshToken: "r", ExpiresAt: time.Now().Add(1 * time.Hour), DevicePrivateKey: generateTestPrivateKey(t)})
+
+	ok, err := c.CanDownload(context.Background(), Book{ASIN: "B001", ContentType: "audiobook"})
+	if err != nil {
+		t.Fatalf("CanDownload returned error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected CanDownload true, got false")
 	}
 }
 

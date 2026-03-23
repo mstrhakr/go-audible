@@ -1,6 +1,10 @@
 package audible_test
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"testing"
 
 	audible "github.com/mstrhakr/go-audible"
@@ -127,3 +131,59 @@ func TestDeriveKey(t *testing.T) {
 		t.Error("Different inputs should produce different key")
 	}
 }
+
+func TestSignRequest(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate RSA key: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+
+	sig, date, err := audible.SignRequest(string(pemBytes), "POST", "/test", "body", "token")
+	if err != nil {
+		t.Fatalf("SignRequest failed: %v", err)
+	}
+	if sig == "" || date == "" {
+		t.Fatal("expected non-empty signature and date")
+	}
+}
+
+func TestGenerateDeviceSerialAndState(t *testing.T) {
+	serial, err := audible.GenerateDeviceSerial()
+	if err != nil {
+		t.Fatalf("GenerateDeviceSerial failed: %v", err)
+	}
+	if len(serial) != 32 {
+		t.Fatalf("expected serial length 32, got %d", len(serial))
+	}
+
+	state, err := audible.GenerateRandomState()
+	if err != nil {
+		t.Fatalf("GenerateRandomState failed: %v", err)
+	}
+	if len(state) != 32 {
+		t.Fatalf("expected random state length 32, got %d", len(state))
+	}
+}
+
+func TestAESRoundTrip(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	plaintext := []byte("hello world example")
+
+	ciphertext, err := audible.EncryptAES(plaintext, key)
+	if err != nil {
+		t.Fatalf("EncryptAES failed: %v", err)
+	}
+
+	decoded, err := audible.DecryptAES(ciphertext, key)
+	if err != nil {
+		t.Fatalf("DecryptAES failed: %v", err)
+	}
+	if string(decoded) != string(plaintext) {
+		t.Fatalf("plaintext mismatch: got %s", string(decoded))
+	}
+}
+
