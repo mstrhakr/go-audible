@@ -130,7 +130,11 @@ func (c *Client) CanDownload(ctx context.Context, b Book) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		return false, fmt.Errorf("download URL probe returned status %d", resp.StatusCode)
@@ -485,7 +489,11 @@ func (c *Client) doAPIRequest(ctx context.Context, method, path, body string) ([
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

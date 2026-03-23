@@ -63,5 +63,3 @@ jobs:
           version: latest
           args: --timeout 5m --path-mode=abs ./
           working-directory: .
-
-
