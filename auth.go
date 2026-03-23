@@ -101,24 +101,24 @@ func (c *Client) GetAuthURL() (*AuthURL, error) {
 
 	// Build OAuth URL parameters — matches Python audible login.py build_oauth_url()
 	params := url.Values{
-		"openid.oa2.response_type":         {"code"},
-		"openid.oa2.code_challenge_method": {"S256"},
-		"openid.oa2.code_challenge":        {codeChallenge},
-		"openid.return_to":                 {returnTo},
-		"openid.assoc_handle":              {"amzn_audible_ios_" + c.marketplace.CountryCode},
-		"openid.identity":                  {"http://specs.openid.net/auth/2.0/identifier_select"},
-		"openid.claimed_id":                {"http://specs.openid.net/auth/2.0/identifier_select"},
-		"openid.mode":                      {"checkid_setup"},
-		"openid.ns":                        {"http://specs.openid.net/auth/2.0"},
-		"openid.ns.oa2":                    {"http://www.amazon.com/ap/ext/oauth/2"},
-		"openid.oa2.client_id":             {"device:" + clientID},
-		"openid.oa2.scope":                 {"device_auth_access"},
-		"openid.ns.pape":                   {"http://specs.openid.net/extensions/pape/1.0"},
-		"openid.pape.max_auth_age":         {"0"},
-		"accountStatusPolicy":              {"P1"},
-		"pageId":                           {"amzn_audible_ios"},
-		"forceMobileLayout":                {"true"},
-		"marketPlaceId":                    {c.marketplace.MarketplaceID},
+		"openid.oa2.response_type":         []string{"code"},
+		"openid.oa2.code_challenge_method": []string{"S256"},
+		"openid.oa2.code_challenge":        []string{codeChallenge},
+		"openid.return_to":                 []string{returnTo},
+		"openid.assoc_handle":              []string{"amzn_audible_ios_" + c.marketplace.CountryCode},
+		"openid.identity":                  []string{"http://specs.openid.net/auth/2.0/identifier_select"},
+		"openid.claimed_id":                []string{"http://specs.openid.net/auth/2.0/identifier_select"},
+		"openid.mode":                      []string{"checkid_setup"},
+		"openid.ns":                        []string{"http://specs.openid.net/auth/2.0"},
+		"openid.ns.oa2":                    []string{"http://www.amazon.com/ap/ext/oauth/2"},
+		"openid.oa2.client_id":             []string{"device:" + clientID},
+		"openid.oa2.scope":                 []string{"device_auth_access"},
+		"openid.ns.pape":                   []string{"http://specs.openid.net/extensions/pape/1.0"},
+		"openid.pape.max_auth_age":         []string{"0"},
+		"accountStatusPolicy":              []string{"P1"},
+		"pageId":                           []string{"amzn_audible_ios"},
+		"forceMobileLayout":                []string{"true"},
+		"marketPlaceId":                    []string{c.marketplace.MarketplaceID},
 	}
 
 	// Build the full URL
@@ -431,11 +431,11 @@ func (c *Client) doRefreshToken(ctx context.Context) error {
 	refreshURL := fmt.Sprintf("%s/auth/token", endpoint)
 
 	body := url.Values{
-		"app_name":             {AppName},
-		"app_version":          {AppVersion},
-		"source_token":         {refreshToken},
-		"source_token_type":    {"refresh_token"},
-		"requested_token_type": {"access_token"},
+		"app_name":             []string{AppName},
+		"app_version":          []string{AppVersion},
+		"source_token":         []string{refreshToken},
+		"source_token_type":    []string{"refresh_token"},
+		"requested_token_type": []string{"access_token"},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", refreshURL, strings.NewReader(body.Encode()))

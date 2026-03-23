@@ -142,7 +142,7 @@ func (e *LicenseDeniedError) Error() string {
 func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInfo, error) {
 	// Request license and download URL
 	params := url.Values{
-		"response_groups": {"content_reference,chapter_info"},
+		"response_groups": []string{"content_reference,chapter_info"},
 	}
 
 	path := fmt.Sprintf("/1.0/content/%s/licenserequest?%s", asin, params.Encode())
@@ -520,7 +520,7 @@ func walkForKeyIV(v any, st *keyIVState) {
 // GetChapters retrieves chapter information for an audiobook.
 func (c *Client) GetChapters(ctx context.Context, asin string) (*ChapterInfo, error) {
 	params := url.Values{
-		"response_groups": {"chapter_info"},
+		"response_groups": []string{"chapter_info"},
 	}
 
 	path := fmt.Sprintf("/1.0/content/%s/metadata?%s", asin, params.Encode())

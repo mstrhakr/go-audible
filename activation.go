@@ -70,9 +70,9 @@ func (c *Client) fetchActivationBlob(ctx context.Context) ([]byte, error) {
 	// Build request URL with required params
 	baseURL := fmt.Sprintf("https://www.%s/license/token", c.marketplace.AudibleDomain())
 	params := url.Values{
-		"player_manuf": {"Audible,iPhone"},
-		"action":       {"register"},
-		"player_model": {"iPhone"},
+		"player_manuf": []string{"Audible,iPhone"},
+		"action":       []string{"register"},
+		"player_model": []string{"iPhone"},
 	}
 	fullURL := baseURL + "?" + params.Encode()
 

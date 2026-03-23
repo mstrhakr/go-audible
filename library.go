@@ -355,10 +355,10 @@ func (c *Client) GetLibrary(ctx context.Context, opts ...LibraryOption) (*Librar
 
 	// Build query parameters
 	params := url.Values{
-		"response_groups": {strings.Join(options.responseGroups, ",")},
-		"num_results":     {strconv.Itoa(options.pageSize)},
-		"page":            {strconv.Itoa(options.page)},
-		"sort_by":         {options.sortBy},
+		"response_groups": []string{strings.Join(options.responseGroups, ",")},
+		"num_results":     []string{strconv.Itoa(options.pageSize)},
+		"page":            []string{strconv.Itoa(options.page)},
+		"sort_by":         []string{options.sortBy},
 	}
 
 	if options.purchasedAfter != "" {
@@ -423,7 +423,7 @@ func (c *Client) GetBook(ctx context.Context, asin string, opts ...LibraryOption
 
 	// Build query parameters
 	params := url.Values{
-		"response_groups": {strings.Join(options.responseGroups, ",")},
+		"response_groups": []string{strings.Join(options.responseGroups, ",")},
 	}
 
 	// Make request
