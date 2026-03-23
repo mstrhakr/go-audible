@@ -87,17 +87,32 @@ func loadFixture(t *testing.T, name string) []byte {
 		t.Fatal("unable to identify caller frame")
 	}
 
-	candidates := []string{
-		filepath.Join("testdata", name),
-		filepath.Join(filepath.Dir(sourceFile), "testdata", name),
-	}
-	// include absolute path of cwd to protect from non-root invocation
+	searchDirs := []string{}
 	if cwd, err := os.Getwd(); err == nil {
-		candidates = append([]string{filepath.Join(cwd, "testdata", name)}, candidates...)
+		searchDirs = append(searchDirs, cwd)
+	}
+
+	sourceDir := filepath.Dir(sourceFile)
+	searchDirs = append(searchDirs, sourceDir)
+
+	// Search up the directory tree to tolerate nested checkout paths
+	for current := sourceDir; current != "." && current != string(filepath.Separator); {
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		searchDirs = append(searchDirs, parent)
+		current = parent
 	}
 
 	var lastErr error
-	for _, path := range candidates {
+	tried := map[string]struct{}{}
+	for _, base := range searchDirs {
+		path := filepath.Join(base, "testdata", name)
+		if _, done := tried[path]; done {
+			continue
+		}
+		tried[path] = struct{}{}
 		b, err := os.ReadFile(path)
 		if err == nil {
 			return b
@@ -105,7 +120,12 @@ func loadFixture(t *testing.T, name string) []byte {
 		lastErr = err
 	}
 
-	t.Fatalf("failed to read fixture %s: %v", name, lastErr)
+	candidates := make([]string, 0, len(tried))
+	for p := range tried {
+		candidates = append(candidates, p)
+	}
+
+	t.Fatalf("failed to read fixture %s; tried %d path(s): %v; last error: %v", name, len(candidates), candidates, lastErr)
 	return nil
 }
 
