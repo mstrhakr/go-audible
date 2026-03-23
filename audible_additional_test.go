@@ -86,17 +86,27 @@ func loadFixture(t *testing.T, name string) []byte {
 	if !ok {
 		t.Fatal("unable to identify caller frame")
 	}
-	path := filepath.Join(filepath.Dir(sourceFile), "testdata", name)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		// fallback to relative path, e.g. when working outside module root
-		path = filepath.Join("testdata", name)
-		b, err = os.ReadFile(path)
+
+	candidates := []string{
+		filepath.Join("testdata", name),
+		filepath.Join(filepath.Dir(sourceFile), "testdata", name),
 	}
-	if err != nil {
-		t.Fatalf("failed to read fixture %s: %v", path, err)
+	// include absolute path of cwd to protect from non-root invocation
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append([]string{filepath.Join(cwd, "testdata", name)}, candidates...)
 	}
-	return b
+
+	var lastErr error
+	for _, path := range candidates {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			return b
+		}
+		lastErr = err
+	}
+
+	t.Fatalf("failed to read fixture %s: %v", name, lastErr)
+	return nil
 }
 
 func TestIsAllDigits(t *testing.T) {
