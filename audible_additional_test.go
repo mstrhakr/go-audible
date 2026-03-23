@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,6 +46,28 @@ func TestBuildClientID(t *testing.T) {
 	}
 }
 
+func TestBuildInitCookies(t *testing.T) {
+	cookies := buildInitCookies("audible.com")
+	if len(cookies) != 3 {
+		t.Fatalf("expected 3 cookies, got %d", len(cookies))
+	}
+	if cookies[0].Name != "frc" || cookies[0].Domain != ".audible.com" {
+		t.Fatalf("unexpected frc cookie: %#v", cookies[0])
+	}
+	if cookies[1].Name != "map-md" || cookies[1].Domain != ".audible.com" {
+		t.Fatalf("unexpected map-md cookie: %#v", cookies[1])
+	}
+	if cookies[2].Name != "amzn-app-id" || cookies[2].Domain != ".audible.com" {
+		t.Fatalf("unexpected amzn-app-id cookie: %#v", cookies[2])
+	}
+	if _, err := base64.StdEncoding.DecodeString(cookies[0].Value); err != nil {
+		t.Fatalf("frc not valid base64: %v", err)
+	}
+	if _, err := base64.StdEncoding.DecodeString(cookies[1].Value); err != nil {
+		t.Fatalf("map-md not valid base64: %v", err)
+	}
+}
+
 func TestParseExpiresIn(t *testing.T) {
 	if got := parseExpiresIn(float64(123)); got != 123 {
 		t.Fatalf("expected 123 got %d", got)
@@ -55,6 +78,15 @@ func TestParseExpiresIn(t *testing.T) {
 	if got := parseExpiresIn(nil); got != 3600 {
 		t.Fatalf("expected default 3600 got %d", got)
 	}
+}
+
+func loadFixture(t *testing.T, name string) []byte {
+	path := filepath.Join("testdata", name)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read fixture %s: %v", path, err)
+	}
+	return b
 }
 
 func TestIsAllDigits(t *testing.T) {
@@ -208,20 +240,7 @@ func TestDoRefreshTokenAndDeregisterDevice(t *testing.T) {
 }
 
 func TestAuthenticateFromFixture(t *testing.T) {
-	respJSON := `{
-		"response": {
-			"success": {
-				"extensions": {
-					"device_info": {"device_name": "Audible Device", "device_serial_number": "0000", "device_type": "A2CZJZGLK2JJVM"},
-					"customer_info": {"user_id": "customer123"}
-				},
-				"tokens": {
-					"bearer": {"access_token": "access-token-abc", "refresh_token": "refresh-token-xyz", "expires_in": 3600},
-					"mac_dms": {"device_private_key": "dummy-private-key", "adp_token": "dummy-adp-token"}
-				}
-			}
-		}
-	}`
+	respJSON := string(loadFixture(t, "auth_register_response.json"))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/auth/register" || r.Method != http.MethodPost {
@@ -264,6 +283,62 @@ func TestDoAPIRequest(t *testing.T) {
 	}
 	if string(body) != `{"ok":true}` {
 		t.Fatalf("unexpected body: %s", string(body))
+	}
+}
+
+func TestDoAPIRequestStatusMapping(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	c.SetCredentials(&Credentials{ADPToken: "token", DevicePrivateKey: generateTestPrivateKey(t), AccessToken: "a", RefreshToken: "r", ExpiresAt: time.Now().Add(1 * time.Hour)})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+	c.SetAPIEndpoint(server.URL)
+
+	_, err := c.doAPIRequest(context.Background(), "GET", "/test", "")
+	if err != ErrRateLimited {
+		t.Fatalf("expected ErrRateLimited, got %v", err)
+	}
+
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	})
+	_, err = c.doAPIRequest(context.Background(), "GET", "/test", "")
+	if err != ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials, got %v", err)
+	}
+
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	_, err = c.doAPIRequest(context.Background(), "GET", "/test", "")
+	if err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetAllLibrary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		page := r.URL.Query().Get("page")
+		if page == "1" {
+			_, _ = w.Write([]byte(`{"items":[{"asin":"B001","title":"Test"}],"total_results":2}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[],"total_results":2}`))
+	}))
+	defer server.Close()
+
+	c := NewClient(MarketplaceUS)
+	c.SetAPIEndpoint(server.URL)
+	c.SetCredentials(&Credentials{ADPToken: "token", DevicePrivateKey: generateTestPrivateKey(t), AccessToken: "a", RefreshToken: "r", ExpiresAt: time.Now().Add(1 * time.Hour)})
+
+	books, err := c.GetAllLibrary(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllLibrary failed: %v", err)
+	}
+	if len(books) != 1 || books[0].BestID() != "B001" {
+		t.Fatalf("unexpected books %v", books)
 	}
 }
 
