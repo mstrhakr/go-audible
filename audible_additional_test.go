@@ -9,7 +9,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
-	"embed"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -20,13 +19,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
-
-//go:embed testdata/*
-var fixtureFS embed.FS
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
@@ -85,10 +82,15 @@ func TestParseExpiresIn(t *testing.T) {
 }
 
 func loadFixture(t *testing.T, name string) []byte {
-	path := filepath.Join("testdata", name)
-	b, err := fixtureFS.ReadFile(path)
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("unable to identify caller frame")
+	}
+	path := filepath.Join(filepath.Dir(sourceFile), "testdata", name)
+	b, err := os.ReadFile(path)
 	if err != nil {
-		// fallback to filesystem for non-embedded usage
+		// fallback to relative path, e.g. when working outside module root
+		path = filepath.Join("testdata", name)
 		b, err = os.ReadFile(path)
 	}
 	if err != nil {
