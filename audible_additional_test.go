@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -108,22 +109,30 @@ func loadFixture(t *testing.T, name string) []byte {
 	var lastErr error
 	tried := map[string]struct{}{}
 	for _, base := range searchDirs {
-		path := filepath.Join(base, "testdata", name)
-		if _, done := tried[path]; done {
-			continue
+		paths := []string{
+			filepath.Join(base, "testdata", name),
+			filepath.Join(base, "go-audible", "testdata", name),
+			filepath.Join(base, "..", "testdata", name),
 		}
-		tried[path] = struct{}{}
-		b, err := os.ReadFile(path)
-		if err == nil {
-			return b
+		for _, path := range paths {
+			if _, done := tried[path]; done {
+				continue
+			}
+			tried[path] = struct{}{}
+			b, err := os.ReadFile(path)
+			if err == nil {
+				return b
+			}
+			lastErr = err
 		}
-		lastErr = err
 	}
 
 	candidates := make([]string, 0, len(tried))
 	for p := range tried {
 		candidates = append(candidates, p)
 	}
+	// stable output across runs
+	sort.Strings(candidates)
 
 	t.Fatalf("failed to read fixture %s; tried %d path(s): %v; last error: %v", name, len(candidates), candidates, lastErr)
 	return nil
