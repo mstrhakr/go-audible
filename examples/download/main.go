@@ -100,7 +100,10 @@ func main() {
 	// Ask to download
 	fmt.Print("\nDownload this book? [y/N]: ")
 	var answer string
-	fmt.Scanln(&answer)
+	if _, err := fmt.Scanln(&answer); err != nil {
+		log.Printf("Warning: failed to read answer; assuming no: %v", err)
+		return
+	}
 
 	if answer != "y" && answer != "Y" {
 		fmt.Println("Download cancelled.")
@@ -113,7 +116,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create output file: %v", err)
 	}
-	defer writer.Close()
+	defer func() {
+		if err := writer.Close(); err != nil {
+			log.Printf("Warning: failed to close writer: %v", err)
+		}
+	}()
 
 	fmt.Printf("\n⬇️  Downloading to %s...\n", outputPath)
 

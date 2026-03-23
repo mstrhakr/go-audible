@@ -176,22 +176,6 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-func printBook(b audible.Book, api, calc bool) {
-	id := b.BestID()
-	if id == "" {
-		id = "(unknown)"
-	}
-	fmt.Printf("%-12s %-50s %-5t %-8t %-12q %-10q %-15q\n",
-		id,
-		truncate(strings.TrimSpace(b.Title), 50),
-		api,
-		calc,
-		b.ContentType,
-		b.FormatType,
-		b.ContentDeliveryType,
-	)
-}
-
 func printRow(r resultRow) {
 	fmt.Printf("%-12s %-50s %-5t %-8t %-12q %-10q %-15q %-6t\n",
 		r.ASIN,

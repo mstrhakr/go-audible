@@ -548,7 +548,9 @@ func TestTrimNullBytes(t *testing.T) {
 func TestGetChapters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"content_metadata":{"chapter_info":{"runtime_length_ms":1234}}}`))
+		if _, err := w.Write([]byte(`{"content_metadata":{"chapter_info":{"runtime_length_ms":1234}}}`)); err != nil {
+			t.Fatalf("failed to write response body: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -569,10 +571,14 @@ func TestGetLibraryAndGetBook(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(r.URL.Path, "/1.0/library/") {
-			w.Write([]byte(`{"item":{"asin":"B001","title":"Test"}}`))
+			if _, err := w.Write([]byte(`{"item":{"asin":"B001","title":"Test"}}`)); err != nil {
+				t.Fatalf("failed to write response body: %v", err)
+			}
 			return
 		}
-		w.Write([]byte(`{"items":[{"asin":"B001","title":"Test"}],"total_results":1}`))
+		if _, err := w.Write([]byte(`{"items":[{"asin":"B001","title":"Test"}],"total_results":1}`)); err != nil {
+			t.Fatalf("failed to write response body: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -1009,7 +1015,11 @@ func TestDoDownloadRequestErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doDownloadRequest failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			t.Fatalf("failed to close response body: %v", cerr)
+		}
+	}()
 	b, _ := io.ReadAll(resp.Body)
 	if string(b) != "ok" {
 		t.Fatalf("unexpected body %s", string(b))

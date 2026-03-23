@@ -457,9 +457,10 @@ func looksLikeAAXCKeyIV(key, iv string) bool {
 
 func isHex(s string) bool {
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-			return false
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') {
+			continue
 		}
+		return false
 	}
 	return true
 }
@@ -682,7 +683,7 @@ func FormatChaptersFile(chapters []Chapter) string {
 		seconds := ms / 1000
 		millis := ms % 1000
 
-		sb.WriteString(fmt.Sprintf("%02d:%02d:%02d.%03d %s\n", hours, minutes, seconds, millis, ch.Title))
+		fmt.Fprintf(&sb, "%02d:%02d:%02d.%03d %s\n", hours, minutes, seconds, millis, ch.Title)
 	}
 
 	return sb.String()

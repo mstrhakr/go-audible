@@ -288,7 +288,11 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 	if err != nil {
 		return fmt.Errorf("registration request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

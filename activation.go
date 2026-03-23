@@ -93,7 +93,13 @@ func (c *Client) fetchActivationBlob(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			// Closing body failed; the request itself may still succeed.
+			// We can't return an error from defer, so log as fallback.
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)

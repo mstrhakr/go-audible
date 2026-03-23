@@ -48,8 +48,11 @@ func main() {
 
 		// Save credentials for next time
 		if data, err := client.MarshalCredentials(); err == nil {
-			os.WriteFile(credsFile, data, 0600)
-			fmt.Println("Credentials saved")
+			if err := os.WriteFile(credsFile, data, 0600); err != nil {
+				log.Printf("Warning: failed to save credentials: %v", err)
+			} else {
+				fmt.Println("Credentials saved")
+			}
 		}
 	}
 
