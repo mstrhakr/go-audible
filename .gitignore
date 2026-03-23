@@ -19,7 +19,6 @@ go.work
 
 # Credentials and config files
 credentials.json
-*.json
 !go.mod
 !go.sum
 

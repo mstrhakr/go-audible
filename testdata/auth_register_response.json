@@ -1,0 +1,27 @@
+{
+  "response": {
+    "success": {
+      "extensions": {
+        "device_info": {
+          "device_name": "Audible Device",
+          "device_serial_number": "0000",
+          "device_type": "A2CZJZGLK2JJVM"
+        },
+        "customer_info": {
+          "user_id": "customer123"
+        }
+      },
+      "tokens": {
+        "bearer": {
+          "access_token": "access-token-abc",
+          "refresh_token": "refresh-token-xyz",
+          "expires_in": 3600
+        },
+        "mac_dms": {
+          "device_private_key": "dummy-private-key",
+          "adp_token": "dummy-adp-token"
+        }
+      }
+    }
+  }
+}
