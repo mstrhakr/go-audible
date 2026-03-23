@@ -57,11 +57,11 @@ jobs:
       - name: Run go test race
         run: go test -race ./.
 
-      - name: Install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.57.0
-
       - name: Run linter
-        run: |
-          $(go env GOPATH)/bin/golangci-lint run ./.
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.57.0
+          args: --timeout 5m
+          working-directory: .
+
 
