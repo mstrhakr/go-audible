@@ -17,7 +17,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -209,6 +208,21 @@ func TestDoRefreshTokenAndDeregisterDevice(t *testing.T) {
 }
 
 func TestAuthenticateFromFixture(t *testing.T) {
+	respJSON := `{
+		"response": {
+			"success": {
+				"extensions": {
+					"device_info": {"device_name": "Audible Device", "device_serial_number": "0000", "device_type": "A2CZJZGLK2JJVM"},
+					"customer_info": {"user_id": "customer123"}
+				},
+				"tokens": {
+					"bearer": {"access_token": "access-token-abc", "refresh_token": "refresh-token-xyz", "expires_in": 3600},
+					"mac_dms": {"device_private_key": "dummy-private-key", "adp_token": "dummy-adp-token"}
+				}
+			}
+		}
+	}`
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/auth/register" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
@@ -216,12 +230,7 @@ func TestAuthenticateFromFixture(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		data, err := os.ReadFile(filepath.Join("testdata", "auth_register_response.json"))
-		if err != nil {
-			w.Write([]byte(`{"error":"fixture missing"}`))
-			return
-		}
-		w.Write(data)
+		_, _ = w.Write([]byte(respJSON))
 	}))
 	defer server.Close()
 
