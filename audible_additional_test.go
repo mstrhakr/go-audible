@@ -731,6 +731,361 @@ func TestDownloadBookAttemptSuccess(t *testing.T) {
 	}
 }
 
+func TestExtractActivationBytesErrors(t *testing.T) {
+	// no group_id marker
+	_, err := ExtractActivationBytes([]byte("abcd"))
+	if err != ErrInvalidActivation {
+		t.Fatalf("expected ErrInvalidActivation, got %v", err)
+	}
+
+	// too short blob with group_id
+	_, err = ExtractActivationBytes([]byte("group_id"))
+	if err == nil {
+		t.Fatal("expected error for short blob")
+	}
+
+	// server error marker
+	_, err = ExtractActivationBytes([]byte("group_id" + strings.Repeat("x", 568) + "BAD_LOGIN"))
+	if err == nil || !strings.Contains(err.Error(), "activation request rejected") {
+		t.Fatalf("unexpected error for BAD_LOGIN: %v", err)
+	}
+}
+
+func TestExtractActivationBytesLegacyHeuristic(t *testing.T) {
+	// no marker
+	_, err := ExtractActivationBytesLegacy([]byte("no marker"))
+	if err != ErrInvalidActivation {
+		t.Fatalf("expected ErrInvalidActivation, got %v", err)
+	}
+
+	// marker with hex pattern
+	blob := []byte("prefix license_response 00a4b6c8 suffix")
+	got, err := ExtractActivationBytesLegacy(blob)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "00a4b6c8" {
+		t.Fatalf("expected 00a4b6c8, got %s", got)
+	}
+}
+
+func TestHexHelpers(t *testing.T) {
+	if !isValidHex("deadbeef") {
+		t.Fatal("expected valid hex")
+	}
+	if isValidHex("nothex") {
+		t.Fatal("expected invalid hex")
+	}
+	if min(5, 3) != 3 || min(1, 2) != 1 {
+		t.Fatal("min function failed")
+	}
+}
+
+func TestDecryptVoucherInvalid(t *testing.T) {
+	_, _, err := DecryptVoucher("not-base64", "type", "serial", "cust", "asin")
+	if err == nil {
+		t.Fatal("expected error for invalid base64")
+	}
+
+	// Create a voucher with missing key/iv in JSON.
+	plaintext := []byte("{}")
+	padding := aes.BlockSize - len(plaintext)%aes.BlockSize
+	for i := 0; i < padding; i++ {
+		plaintext = append(plaintext, byte(padding))
+	}
+	buf := []byte("type" + "serial" + "cust" + "asin")
+	digest := sha256.Sum256(buf)
+	key := digest[0:16]
+	iv := digest[16:32]
+	block, _ := aes.NewCipher(key)
+	ciphertext := make([]byte, len(plaintext))
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ciphertext, plaintext)
+	voucher := base64.StdEncoding.EncodeToString(ciphertext)
+
+	_, _, err = DecryptVoucher(voucher, "type", "serial", "cust", "asin")
+	if err == nil {
+		t.Fatal("expected error for missing key/iv")
+	}
+}
+
+func TestCanDownloadErrorPaths(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	c.SetCredentials(&Credentials{ADPToken: "x", DevicePrivateKey: generateTestPrivateKey(t), AccessToken: "a", RefreshToken: "r", ExpiresAt: time.Now().Add(1 * time.Hour)})
+	c.httpClient = &http.Client{}
+
+	ok, err := c.CanDownload(context.Background(), Book{})
+	if err != nil || ok {
+		t.Fatalf("expected false,nil for empty book, got %v,%v", ok, err)
+	}
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/1.0/content/") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content_license":{"asin":"B001","status_code":"Ok","content_url":"` + server.URL + `/download"}}`))
+			return
+		}
+		if r.URL.Path == "/download" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	c.SetAPIEndpoint(server.URL)
+	_, err = c.CanDownload(context.Background(), Book{ASIN: "B001", ContentType: "audiobook"})
+	if err == nil || !strings.Contains(err.Error(), "download URL probe returned status") {
+		t.Fatalf("unexpected error for bad probe status: %v", err)
+	}
+}
+
+func TestAudibleClientCoreMethods(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	if c.IsAuthenticated() {
+		t.Fatal("expected unauthenticated client")
+	}
+	if c.APIEndpoint() != MarketplaceUS.APIEndpoint() {
+		t.Fatalf("unexpected API endpoint %s", c.APIEndpoint())
+	}
+
+	c.SetAPIEndpoint("https://localhost")
+	if c.APIEndpoint() != "https://localhost" {
+		t.Fatalf("unexpected overridden API endpoint %s", c.APIEndpoint())
+	}
+
+	c.SetMarketplace(MarketplaceUK)
+	if c.Marketplace().CountryCode != "uk" {
+		t.Fatalf("unexpected marketplace %s", c.Marketplace().CountryCode)
+	}
+
+	creds := &Credentials{ADPToken: "test", DevicePrivateKey: generateTestPrivateKey(t), CustomerID: "cust", Marketplace: "us"}
+	c.SetCredentials(creds)
+	if !c.IsAuthenticated() {
+		t.Fatal("expected authenticated after set credentials")
+	}
+
+	data, err := c.MarshalCredentials()
+	if err != nil {
+		t.Fatalf("MarshalCredentials failed: %v", err)
+	}
+
+	c2 := NewClient(MarketplaceUS)
+	if err := c2.UnmarshalCredentials(data); err != nil {
+		t.Fatalf("UnmarshalCredentials failed: %v", err)
+	}
+	if !c2.IsAuthenticated() {
+		t.Fatal("expected c2 authenticated after unmarshal")
+	}
+
+	f := filepath.Join(t.TempDir(), "creds.json")
+	if err := c.SaveCredentials(f); err != nil {
+		t.Fatalf("SaveCredentials failed: %v", err)
+	}
+	c3 := NewClient(MarketplaceUS)
+	if err := c3.LoadCredentials(f); err != nil {
+		t.Fatalf("LoadCredentials failed: %v", err)
+	}
+	if c3.GetCredentials().ADPToken != "test" {
+		t.Fatalf("LoadCredentials value mismatch")
+	}
+}
+
+func TestAuthUtilities(t *testing.T) {
+	cookies := buildInitCookies("audible.com")
+	if len(cookies) != 3 || cookies[0].Name != "frc" || cookies[1].Name != "map-md" || cookies[2].Name != "amzn-app-id" {
+		t.Fatal("buildInitCookies returned unexpected cookies")
+	}
+
+	id := buildClientID("ABC123")
+	if id == "" {
+		t.Fatal("buildClientID returned empty")
+	}
+}
+
+func TestCryptoUtilities(t *testing.T) {
+	serial, err := GenerateDeviceSerial()
+	if err != nil || serial == "" {
+		t.Fatalf("GenerateDeviceSerial failed: %v", err)
+	}
+
+	verifier, err := GenerateCodeVerifier()
+	if err != nil || verifier == "" {
+		t.Fatalf("GenerateCodeVerifier failed: %v", err)
+	}
+	challenge := GenerateCodeChallenge(verifier)
+	if challenge == "" {
+		t.Fatal("GenerateCodeChallenge returned empty")
+	}
+
+	state, err := GenerateRandomState()
+	if err != nil || state == "" {
+		t.Fatalf("GenerateRandomState failed: %v", err)
+	}
+
+	// Sign request invalid key
+	_, _, err = SignRequest("badkey", "GET", "/", "", "token")
+	if err == nil {
+		t.Fatal("SignRequest should fail with invalid key")
+	}
+
+	// Encrypt/Decrypt AES
+	key := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	plaintext := []byte("hello world")
+	ciphertext, err := EncryptAES(plaintext, key)
+	if err != nil {
+		t.Fatalf("EncryptAES failed: %v", err)
+	}
+	decoded, err := DecryptAES(ciphertext, key)
+	if err != nil {
+		t.Fatalf("DecryptAES failed: %v", err)
+	}
+	if string(decoded) != string(plaintext) {
+		t.Fatalf("DecryptAES got %q, want %q", decoded, plaintext)
+	}
+
+	// Invalid AES key length
+	_, err = EncryptAES(plaintext, []byte("short"))
+	if err == nil {
+		t.Fatal("EncryptAES should fail with invalid key length")
+	}
+
+	_, err = DecryptAES([]byte("abc"), key)
+	if err == nil {
+		t.Fatal("DecryptAES should fail for short ciphertext")
+	}
+}
+
+func TestXXTEAUtilities(t *testing.T) {
+	key := []byte("1234567890abcdef")
+	data := []byte("abcd1234abcd1234") // 16 bytes multiple of 4
+	enc, err := XXTEAEncrypt(data, key)
+	if err != nil {
+		t.Fatalf("XXTEAEncrypt failed: %v", err)
+	}
+	dec, err := XXTEADecrypt(enc, key)
+	if err != nil {
+		t.Fatalf("XXTEADecrypt failed: %v", err)
+	}
+	if string(dec) != string(data) {
+		t.Fatalf("XXTEA roundtrip mismatch")
+	}
+}
+
+func TestDoDownloadRequestErrors(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	_, err := c.doDownloadRequest(context.Background(), "http://example.com")
+	if err != ErrNotAuthenticated {
+		t.Fatalf("expected ErrNotAuthenticated, got %v", err)
+	}
+
+	c.SetCredentials(&Credentials{ADPToken: "token", AccessToken: "access", DevicePrivateKey: generateTestPrivateKey(t), ExpiresAt: time.Now().Add(1 * time.Hour)})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	c.httpClient = &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+	})}
+
+	resp, err := c.doDownloadRequest(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("doDownloadRequest failed: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if string(b) != "ok" {
+		t.Fatalf("unexpected body %s", string(b))
+	}
+}
+
+func TestDownloadHelpers(t *testing.T) {
+	if !isHex("deadBEEF") {
+		t.Fatal("expected isHex true")
+	}
+	if isHex("not_hex") {
+		t.Fatal("expected isHex false")
+	}
+	if !looksLikeAAXCKeyIV("0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef") {
+		t.Fatal("expected looksLikeAAXCKeyIV true")
+	}
+	if looksLikeAAXCKeyIV("short", "short") {
+		t.Fatal("expected looksLikeAAXCKeyIV false")
+	}
+
+	key, iv := findKeyIV(map[string]any{"nested": map[string]any{"key": "11111111111111111111111111111111", "iv": "22222222222222222222222222222222"}})
+	if key != "11111111111111111111111111111111" || iv != "22222222222222222222222222222222" {
+		t.Fatalf("unexpected keyiv %s %s", key, iv)
+	}
+
+	key, iv = findKeyIV(`{"key":"33333333333333333333333333333333","iv":"44444444444444444444444444444444"}`)
+	if key != "33333333333333333333333333333333" || iv != "44444444444444444444444444444444" {
+		t.Fatalf("unexpected keyiv from raw json %s %s", key, iv)
+	}
+
+	if extractUserIDFromVoucherMessage("Welcome User [98765]!") != "98765" {
+		t.Fatal("extractUserIDFromVoucherMessage failed")
+	}
+
+	ids := candidateCustomerIDs("amzn1.account.XYZ", "User [ABC]")
+	if len(ids) != 3 {
+		t.Fatalf("candidateCustomerIDs expected3 got %d", len(ids))
+	}
+}
+
+func TestDownloadBookFlow(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	c.SetCredentials(&Credentials{ADPToken: "token", AccessToken: "access", DevicePrivateKey: generateTestPrivateKey(t), ExpiresAt: time.Now().Add(1 * time.Hour), DeviceInfo: DeviceInfo{DeviceSerialNumber: "serial", DeviceType: "type"}, CustomerID: "amzn1.account.xyz"})
+	c.httpClient = &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, "/1.0/content/") {
+			body := `{"content_license":{"asin":"B001","status_code":"Ok","content_url":"https://cdn.local/download"}}`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		}
+		if strings.Contains(req.URL.Path, "/download") {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(strings.Repeat("a", cdnPeekBytes+10))), Header: make(http.Header)}, nil
+		}
+		return nil, nil
+	})}
+
+	writer := &testDownloadWriter{}
+	w, err := c.DownloadBook(context.Background(), "B001", writer)
+	if err != nil {
+		t.Fatalf("DownloadBook failed: %v", err)
+	}
+	if w != int64(cdnPeekBytes+10) {
+		t.Fatalf("DownloadBook bytes=%d expected %d", w, cdnPeekBytes+10)
+	}
+	if !writer.completed {
+		t.Fatal("expected writer completed")
+	}
+}
+
+func TestDownloadBookInfoMissingURL(t *testing.T) {
+	c := NewClient(MarketplaceUS)
+	c.SetCredentials(&Credentials{ADPToken: "token", AccessToken: "access", DevicePrivateKey: generateTestPrivateKey(t), ExpiresAt: time.Now().Add(1 * time.Hour)})
+	c.httpClient = &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if strings.Contains(req.URL.Path, "/1.0/content/") {
+			body := `{"content_license":{"status_code":"Ok"}}`
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		}
+		return nil, nil
+	})}
+	_, err := c.DownloadBook(context.Background(), "B001", &testDownloadWriter{})
+	if err == nil {
+		t.Fatal("expected error from download attempt")
+	}
+	if !strings.Contains(err.Error(), "download request failed") && !strings.Contains(err.Error(), "no content URL available") {
+		t.Fatalf("unexpected error from DownloadBook: %v", err)
+	}
+}
+
 type testDownloadWriter struct {
 	data      []byte
 	completed bool
