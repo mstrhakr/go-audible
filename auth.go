@@ -405,7 +405,12 @@ func (c *Client) DeregisterDevice(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("deregistration request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			// body close failure is non-fatal as request was already processed.
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -454,7 +459,11 @@ func (c *Client) doRefreshToken(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("token refresh request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

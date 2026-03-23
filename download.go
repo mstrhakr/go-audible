@@ -508,12 +508,11 @@ func walkForKeyIV(v any, st *keyIVState) {
 		}
 	case string:
 		trimmed := strings.TrimSpace(node)
-		if !(strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
-			return
-		}
-		var nested any
-		if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
-			walkForKeyIV(nested, st)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			var nested any
+			if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
+				walkForKeyIV(nested, st)
+			}
 		}
 	}
 }
@@ -579,7 +578,11 @@ func (c *Client) downloadBookAttempt(ctx context.Context, asin string, writer Do
 	if err != nil {
 		return 0, fmt.Errorf("download request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			_ = cerr
+		}
+	}()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
