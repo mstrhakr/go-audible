@@ -10,6 +10,7 @@
 
 # Output of the go coverage tool
 *.out
+cover*
 coverage.txt
 coverage.html
 
