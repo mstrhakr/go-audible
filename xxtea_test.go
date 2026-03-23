@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/mstrhakr/go-audible"
+	audible "github.com/mstrhakr/go-audible"
 )
 
 func TestXXTEAEncryptDecrypt(t *testing.T) {
