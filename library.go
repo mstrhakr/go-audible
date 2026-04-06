@@ -99,8 +99,12 @@ func (b Book) Downloadable() bool {
 	return false
 }
 
-// CanDownload checks whether a book is actually download-capable by optionally
-// validating with the download workflow (download info + minimal stream probe).
+// CanDownload checks whether a book is actually download-capable by validating
+// entitlement via the download-info workflow.
+//
+// Note: This intentionally does not probe the CDN content URL. Audible may
+// return transient or policy-based CDN responses (for example 403) even for
+// legitimately owned titles, so URL probing can produce false negatives.
 func (c *Client) CanDownload(ctx context.Context, b Book) (bool, error) {
 	if !b.Downloadable() {
 		return false, nil
@@ -118,26 +122,6 @@ func (c *Client) CanDownload(ctx context.Context, b Book) (bool, error) {
 
 	if info == nil || info.ContentURL == "" {
 		return false, fmt.Errorf("download info missing content URL")
-	}
-
-	// Probe first 100 bytes from the content URL to confirm streaming starts.
-	req, err := http.NewRequestWithContext(ctx, "GET", info.ContentURL, nil)
-	if err != nil {
-		return false, err
-	}
-	req.Header.Set("Range", "bytes=0-99")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return false, err
-	}
-	defer func() {
-		if cerr := resp.Body.Close(); cerr != nil {
-			_ = cerr
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return false, fmt.Errorf("download URL probe returned status %d", resp.StatusCode)
 	}
 
 	return true, nil

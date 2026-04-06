@@ -910,9 +910,12 @@ func TestCanDownloadErrorPaths(t *testing.T) {
 	defer server.Close()
 
 	c.SetAPIEndpoint(server.URL)
-	_, err = c.CanDownload(context.Background(), Book{ASIN: "B001", ContentType: "audiobook"})
-	if err == nil || !strings.Contains(err.Error(), "download URL probe returned status") {
-		t.Fatalf("unexpected error for bad probe status: %v", err)
+	ok, err = c.CanDownload(context.Background(), Book{ASIN: "B001", ContentType: "audiobook"})
+	if err != nil {
+		t.Fatalf("expected nil error after entitlement check, got: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected CanDownload true when license has content URL")
 	}
 }
 
