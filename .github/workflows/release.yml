@@ -21,6 +21,8 @@ jobs:
       - name: Create GitHub release
         id: create_release
         uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
           release_name: ${{ github.ref_name }}
@@ -28,7 +30,7 @@ jobs:
             Automated release generated for tag `${{ github.ref_name }}`.
 
             - Commit: `${{ github.sha }}`
-            - Branch: `${{ github.ref }}/refs/tags` (tag push)
+            - Ref: `${{ github.ref }}` (tag push)
 
             ## Notes
             Update this template in `.github/workflows/release.yml` with additional release details as needed.
