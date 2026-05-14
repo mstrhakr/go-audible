@@ -18,6 +18,24 @@ const (
 	maxCDNRetryAttempts = 3
 )
 
+func debugEnabled() bool {
+	return os.Getenv("DEBUG_GO_AUDIBLE") != ""
+}
+
+func debugf(format string, args ...any) {
+	if !debugEnabled() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
+func debugPrint(s string) {
+	if !debugEnabled() {
+		return
+	}
+	fmt.Fprint(os.Stderr, s)
+}
+
 // DownloadInfo contains information needed to download an audiobook.
 type DownloadInfo struct {
 	// ContentURL is the URL to download the audiobook content.
@@ -166,8 +184,8 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		return nil, fmt.Errorf("license request failed: %w", err)
 	}
 
-	// DEBUG: Log raw API response to stderr for diagnostics
-	fmt.Fprintf(os.Stderr, "[go-audible] RAW API RESPONSE for ASIN %s (length=%d bytes):\n%s\n\n",
+	// Optional debug logging for local diagnostics only.
+	debugf("[go-audible] RAW API RESPONSE for ASIN %s (length=%d bytes):\n%s\n\n",
 		asin, len(respBody), string(respBody))
 
 	// Parse content_license in a tolerant way because Audible can return
@@ -290,29 +308,29 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 					continue
 				}
 				license.Key, license.IV = key, iv
-				fmt.Fprintf(os.Stderr, "[go-audible] Successfully decrypted voucher for ASIN %s using customer_id=%s\n", asin, customerID)
+				debugf("[go-audible] Successfully decrypted voucher for ASIN %s using customer_id=%s\n", asin, customerID)
 				break
 			}
 			if license.Key == "" || license.IV == "" {
-				fmt.Fprintf(os.Stderr, "[go-audible] Failed to decrypt voucher for ASIN %s after %d customer_id candidates: %v\n", asin, len(customerIDs), lastErr)
+				debugf("[go-audible] Failed to decrypt voucher for ASIN %s after %d customer_id candidates: %v\n", asin, len(customerIDs), lastErr)
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "[go-audible] Cannot decrypt voucher: missing device info\n")
+			debugf("[go-audible] Cannot decrypt voucher: missing device info\n")
 		}
 	}
 
 	isAAXC := license.Key != "" && license.IV != ""
 
-	// DEBUG: Log API response details to stderr for diagnostics
+	// Optional debug logging for local diagnostics only.
 	debugOutput := fmt.Sprintf(
 		"[go-audible] GetDownloadInfo for ASIN %s: drm_type=%s, statusCode=%s, "+
 			"keyPresent=%v, ivPresent=%v, isAAXC=%v, voucherPresent=%v\n",
 		asin, license.DrmType, license.StatusCode,
 		license.Key != "", license.IV != "", isAAXC, license.Voucher != "")
-	fmt.Fprint(os.Stderr, debugOutput)
+	debugPrint(debugOutput)
 
 	// If in verbose/debug mode, also log the actual keys (truncated for safety)
-	if os.Getenv("DEBUG_GO_AUDIBLE") != "" {
+	if debugEnabled() {
 		keyTrunc := license.Key
 		if len(keyTrunc) > 16 {
 			keyTrunc = keyTrunc[:8] + "..." + keyTrunc[len(keyTrunc)-8:]
@@ -324,7 +342,7 @@ func (c *Client) GetDownloadInfo(ctx context.Context, asin string) (*DownloadInf
 		verboseOutput := fmt.Sprintf(
 			"[go-audible] DEBUG: key=%s, iv=%s, licenseResponse_len=%d, voucher_len=%d\n",
 			keyTrunc, ivTrunc, len(license.LicenseResponse), len(license.Voucher))
-		fmt.Fprint(os.Stderr, verboseOutput)
+		debugPrint(verboseOutput)
 	}
 
 	if strings.EqualFold(license.StatusCode, "Denied") {
