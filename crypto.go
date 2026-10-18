@@ -14,24 +14,33 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
 
-// SignRequest creates a signed request signature for Audible API calls.
+// SignRequest signs Audible API calls with an RSA key in PEM or base64 DER format.
 // The signature format is: SHA256withRSA({METHOD}\n{PATH}\n{DATE}\n{BODY}\n{ADP_TOKEN})
-func SignRequest(privateKeyPEM string, method, path, body, adpToken string) (signature string, date string, err error) {
+func SignRequest(privateKeyData string, method, path, body, adpToken string) (signature string, date string, err error) {
 	// Parse the private key
-	block, _ := pem.Decode([]byte(privateKeyPEM))
-	if block == nil {
-		return "", "", fmt.Errorf("failed to decode PEM block")
+	encoded := strings.TrimSpace(strings.NewReplacer("\\r", "\r", "\\n", "\n").Replace(privateKeyData))
+	block, _ := pem.Decode([]byte(encoded))
+	var der []byte
+	if block != nil {
+		der = block.Bytes
+	} else {
+		var err error
+		der, err = base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", "", fmt.Errorf("signing key must be PEM or base64 DER")
+		}
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	privateKey, err := x509.ParsePKCS1PrivateKey(der)
 	if err != nil {
 		// Try PKCS8 format
-		key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		key, err2 := x509.ParsePKCS8PrivateKey(der)
 		if err2 != nil {
 			return "", "", fmt.Errorf("failed to parse private key: %w (PKCS1: %v)", err2, err)
 		}
