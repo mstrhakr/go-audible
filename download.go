@@ -732,7 +732,7 @@ func (c *Client) doDownloadRequest(ctx context.Context, downloadURL string) (*ht
 		return nil, fmt.Errorf("failed to create download request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", fmt.Sprintf("Audible/%s (iOS %s; %s)", AppVersion, OSVersion, DeviceModel))
+	req.Header.Set("User-Agent", c.credentialProfile().downloadUserAgent())
 	req.Header.Set("Accept", "audio/mpeg, audio/x-m4a, audio/aax, */*")
 
 	// CDN authenticates via Bearer token, not ADP signing

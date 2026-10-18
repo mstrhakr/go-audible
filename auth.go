@@ -81,6 +81,14 @@ func parseExpiresIn(v any) int {
 // contains the authorization code.  The user must copy that URL and pass it
 // to [HandleAuthRedirect] to extract the code.
 func (c *Client) GetAuthURL() (*AuthURL, error) {
+	return c.GetAuthURLForDevice(IPhone)
+}
+
+// GetAuthURLForDevice starts a fresh registration for the selected device.
+func (c *Client) GetAuthURLForDevice(profile DeviceProfile) (*AuthURL, error) {
+	if err := profile.validate(); err != nil {
+		return nil, err
+	}
 	// Generate PKCE code verifier and challenge
 	codeVerifier, err := GenerateCodeVerifier()
 	if err != nil {
@@ -89,13 +97,13 @@ func (c *Client) GetAuthURL() (*AuthURL, error) {
 	codeChallenge := GenerateCodeChallenge(codeVerifier)
 
 	// Generate device serial
-	deviceSerial, err := GenerateDeviceSerial()
+	deviceSerial, err := profile.serial()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate device serial: %w", err)
 	}
 
 	// Build client ID (hex encoded serial#device_type)
-	clientID := buildClientID(deviceSerial)
+	clientID := profile.clientID(deviceSerial)
 
 	returnTo := fmt.Sprintf("https://www.%s/ap/maplanding", c.marketplace.AmazonDomain())
 
@@ -119,6 +127,14 @@ func (c *Client) GetAuthURL() (*AuthURL, error) {
 		"pageId":                           []string{"amzn_audible_ios"},
 		"forceMobileLayout":                []string{"true"},
 		"marketPlaceId":                    []string{c.marketplace.MarketplaceID},
+	}
+
+	if profile == Android {
+		params.Set("openid.return_to", "https://www."+c.marketplace.AudibleDomain()+"/ap/maplanding")
+		params.Set("openid.assoc_handle", "amzn_audible_android_aui_"+c.marketplace.CountryCode)
+		params.Set("pageId", "amzn_audible_android_aui_v2_dark_"+c.marketplace.CountryCode)
+		params.Del("forceMobileLayout")
+		params.Set("disableLoginPrepopulate", "1")
 	}
 
 	// Build the full URL
@@ -157,6 +173,9 @@ func HandleAuthRedirect(redirectURL string) (string, error) {
 
 // DeviceRegistrationRequest contains the parameters for device registration.
 type DeviceRegistrationRequest struct {
+	// Profile must match the profile used to generate the sign-in URL.
+	Profile DeviceProfile
+
 	// AuthorizationCode is the code received from the OAuth redirect URL.
 	AuthorizationCode string
 
@@ -208,6 +227,10 @@ type deviceRegistrationResponse struct {
 // Authenticate exchanges an authorization code for credentials via device registration.
 // Uses the same DeviceSerial and CodeVerifier that were used in GetAuthURL.
 func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest) error {
+	profile := req.Profile
+	if err := profile.validate(); err != nil {
+		return err
+	}
 	// Use the serial from the auth URL generation (must match)
 	deviceSerial := req.DeviceSerial
 	codeVerifier := req.CodeVerifier
@@ -230,7 +253,7 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 	}
 
 	// Build client ID (must match auth URL)
-	clientID := buildClientID(deviceSerial)
+	clientID := profile.clientID(deviceSerial)
 
 	// Build registration request body — matches Python audible register.py
 	regBody := map[string]interface{}{
@@ -267,13 +290,17 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 		},
 	}
 
+	if err := profile.registrationBody(regBody, deviceSerial, c.marketplace); err != nil {
+		return err
+	}
+
 	bodyJSON, err := json.Marshal(regBody)
 	if err != nil {
 		return fmt.Errorf("failed to marshal registration body: %w", err)
 	}
 
 	// Build request
-	regURL := fmt.Sprintf("%s/auth/register", c.apiBaseURL())
+	regURL := fmt.Sprintf("%s/auth/register", c.authEndpoint(profile))
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", regURL, strings.NewReader(string(bodyJSON)))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -282,6 +309,9 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("User-Agent", fmt.Sprintf("AmazonWebView/Audible/%s/iOS/%s/%s", AppVersion, OSVersion, DeviceModel))
+	if profile == Android {
+		httpReq.Header.Set("User-Agent", profile.userAgent())
+	}
 	httpReq.Header.Set("x-amzn-identity-auth-domain", "api."+c.marketplace.AmazonDomain())
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -326,6 +356,12 @@ func (c *Client) Authenticate(ctx context.Context, req DeviceRegistrationRequest
 			DeviceSerialNumber: success.Extensions.DeviceInfo.DeviceSerialNumber,
 			DeviceType:         success.Extensions.DeviceInfo.DeviceType,
 		},
+	}
+	if creds.DeviceInfo.DeviceType == "" {
+		creds.DeviceInfo.DeviceType = profile.deviceType()
+	}
+	if creds.DeviceInfo.DeviceSerialNumber == "" {
+		creds.DeviceInfo.DeviceSerialNumber = deviceSerial
 	}
 
 	c.mu.Lock()
@@ -437,6 +473,10 @@ func (c *Client) doRefreshToken(ctx context.Context) error {
 	endpoint := c.APIEndpoint()
 	c.mu.RUnlock()
 
+	profile := c.credentialProfile()
+	if profile == Android {
+		endpoint = c.authEndpoint(profile)
+	}
 	refreshURL := fmt.Sprintf("%s/auth/token", endpoint)
 
 	body := url.Values{
@@ -447,6 +487,10 @@ func (c *Client) doRefreshToken(ctx context.Context) error {
 		"requested_token_type": []string{"access_token"},
 	}
 
+	if profile == Android {
+		body.Set("app_name", androidAppName)
+		body.Set("app_version", androidAppVersion)
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", refreshURL, strings.NewReader(body.Encode()))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
