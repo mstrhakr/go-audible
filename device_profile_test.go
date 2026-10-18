@@ -83,6 +83,11 @@ func TestAndroidRegistrationAndReloadKeepTheDeviceProfile(t *testing.T) {
 				t.Error("refresh reverted to iPhone application")
 			}
 			w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
+		case "/1.0/test":
+			if !strings.Contains(r.UserAgent(), "Android") {
+				t.Error("API request reverted to iPhone headers")
+			}
+			w.Write([]byte(`{}`))
 		case "/audio":
 			if !strings.Contains(r.UserAgent(), "Android") {
 				t.Error("download reverted to iPhone headers")
@@ -114,6 +119,7 @@ func TestAndroidRegistrationAndReloadKeepTheDeviceProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved.ExpiresAt = time.Now().Add(-time.Hour)
+	saved.DevicePrivateKey = generateTestPrivateKey(t)
 	reloaded := NewClient(MarketplaceUS)
 	reloaded.SetAPIEndpoint(server.URL)
 	reloaded.SetCredentials(&saved)
@@ -121,6 +127,9 @@ func TestAndroidRegistrationAndReloadKeepTheDeviceProfile(t *testing.T) {
 		t.Fatal("persisted credentials lost Android profile")
 	}
 	if err := reloaded.doRefreshToken(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reloaded.doAPIRequest(context.Background(), "GET", "/1.0/test", ""); err != nil {
 		t.Fatal(err)
 	}
 	response, err := reloaded.doDownloadRequest(context.Background(), server.URL+"/audio")
