@@ -464,7 +464,7 @@ func (c *Client) doAPIRequest(ctx context.Context, method, path, body string) ([
 	// Set headers
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Language", "en-US")
-	req.Header.Set("User-Agent", fmt.Sprintf("Audible/%s (iOS %s; %s)", AppVersion, OSVersion, DeviceModel))
+	req.Header.Set("User-Agent", c.credentialProfile().userAgent())
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
