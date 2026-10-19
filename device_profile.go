@@ -101,7 +101,7 @@ func (p DeviceProfile) registrationBody(body map[string]interface{}, serial stri
 	}
 	decoded, err := hex.DecodeString(serial)
 	if err != nil || len(decoded) != 10 {
-		return fmt.Errorf("Android device serial must contain 20 hexadecimal characters")
+		return fmt.Errorf("device serial for Android must contain 20 hexadecimal characters")
 	}
 	body["requested_token_type"] = []string{"bearer", "mac_dms", "store_authentication_cookie", "website_cookies"}
 	body["cookies"].(map[string]interface{})["domain"] = "www." + marketplace.AmazonDomain()

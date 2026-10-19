@@ -76,23 +76,34 @@ func TestAndroidRegistrationAndReloadKeepTheDeviceProfile(t *testing.T) {
 			}
 			registered = true
 			// Omitting device_info checks that the request identity survives persistence.
-			w.Write([]byte(`{"response":{"success":{"tokens":{"bearer":{"access_token":"access","refresh_token":"refresh","expires_in":3600},"mac_dms":{"adp_token":"adp","device_private_key":"unused"}},"extensions":{"customer_info":{"user_id":"synthetic"}}}}}`))
+			if _, err := w.Write([]byte(`{"response":{"success":{"tokens":{"bearer":{"access_token":"access","refresh_token":"refresh","expires_in":3600},"mac_dms":{"adp_token":"adp","device_private_key":"unused"}},"extensions":{"customer_info":{"user_id":"synthetic"}}}}}`)); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		case "/auth/token":
-			r.ParseForm()
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse refresh form: %v", err)
+				return
+			}
 			if r.Form.Get("app_name") != "com.audible.application" || r.Form.Get("app_version") != "2090263407" {
 				t.Error("refresh reverted to iPhone application")
 			}
-			w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`))
+			if _, err := w.Write([]byte(`{"access_token":"new-access","expires_in":3600}`)); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		case "/1.0/test":
 			if !strings.Contains(r.UserAgent(), "Android") {
 				t.Error("API request reverted to iPhone headers")
 			}
-			w.Write([]byte(`{}`))
+			if _, err := w.Write([]byte(`{}`)); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		case "/audio":
 			if !strings.Contains(r.UserAgent(), "Android") {
 				t.Error("download reverted to iPhone headers")
 			}
-			w.Write([]byte("synthetic audio"))
+			if _, err := w.Write([]byte("synthetic audio")); err != nil {
+				t.Errorf("write test response: %v", err)
+			}
 		default:
 			t.Errorf("unexpected request %s", r.URL.Path)
 		}
@@ -136,7 +147,9 @@ func TestAndroidRegistrationAndReloadKeepTheDeviceProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.Body.Close()
+	if err := response.Body.Close(); err != nil {
+		t.Errorf("close download response: %v", err)
+	}
 }
 
 func TestIPhoneRemainsTheDefaultAndRejectsUnknownProfiles(t *testing.T) {
